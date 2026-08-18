@@ -25,6 +25,8 @@ documented in [Configuration V1](docs/configuration-v1.md).
 The next host-only layer—normalized monitor results, ordered evaluation rules, and
 deterministic interval scheduling—is described in
 [Host Monitor Engine](docs/monitor-engine.md).
+Declarative HTTP GET monitoring with bounded body, timeout, status/body/JSON-Pointer
+observation, and a loopback-tested desktop adapter now uses those contracts.
 
 ---
 
@@ -2133,7 +2135,7 @@ Add scheduling and pull monitors incrementally, followed by MQTT, direct LEDs,
 persistence hardening, management UI, and OTA. Each monitor and output backend should
 enter through the established state, rendering, and driver contracts.
 
-Status: the portable interval scheduler, runner boundary, normalized result, and
-generic evaluator are host-tested with scripted runners. Concrete network runners,
-monitor configuration syntax, jitter/cron support, and the bounded worker executor
-remain incremental follow-on work.
+Status: the portable interval scheduler, runner boundary, normalized result, generic
+evaluator, strict monitor JSON grammar, and first desktop HTTP/JSON runner are
+host-tested. HTTPS, additional network runners, jitter/cron support, and a
+multi-worker executor remain incremental follow-on work.

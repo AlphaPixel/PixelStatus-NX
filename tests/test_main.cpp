@@ -1,12 +1,20 @@
 #include "pixelstatus/appearance.hpp"
 #include "pixelstatus/config.hpp"
 #include "pixelstatus/frame.hpp"
+#include "pixelstatus/http_url.hpp"
 #include "pixelstatus/mi_protocol.hpp"
 #include "pixelstatus/monitor_engine.hpp"
 #include "pixelstatus/renderer.hpp"
 #include "pixelstatus/state.hpp"
 #include "pixelstatus/status_api.hpp"
 
+#ifdef PIXELSTATUS_TEST_HOST_HTTP
+#include "pixelstatus/host/http_monitor_runner.hpp"
+
+#include <httplib.h>
+#endif
+
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <deque>
@@ -17,6 +25,8 @@
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <string_view>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -44,6 +54,25 @@ void test_color_and_duration_parsing() {
     CHECK(pixelstatus::parse_duration("2s") == 2s);
     CHECK(pixelstatus::parse_duration("3m") == 3min);
     CHECK(!pixelstatus::parse_duration("1.5s"));
+}
+
+void test_http_url_parsing() {
+    auto parsed = pixelstatus::parse_http_url("http://example.test:8080/health?full=1");
+    CHECK(parsed.has_value());
+    CHECK(parsed && parsed->scheme == pixelstatus::HttpScheme::http);
+    CHECK(parsed && parsed->base == "http://example.test:8080");
+    CHECK(parsed && parsed->target == "/health?full=1");
+
+    parsed = pixelstatus::parse_http_url("https://example.test?health=1");
+    CHECK(parsed && parsed->scheme == pixelstatus::HttpScheme::https);
+    CHECK(parsed && parsed->target == "/?health=1");
+    CHECK(pixelstatus::parse_http_url("http://[::1]:8080/health").has_value());
+
+    CHECK(!pixelstatus::parse_http_url("ftp://example.test/health"));
+    CHECK(!pixelstatus::parse_http_url("http://user@example.test/health"));
+    CHECK(!pixelstatus::parse_http_url("http://example.test:99999/health"));
+    CHECK(!pixelstatus::parse_http_url("http://example.test/health#fragment"));
+    CHECK(!pixelstatus::parse_http_url("http://example.test/bad path"));
 }
 
 void test_frame_bounds() {
@@ -197,6 +226,40 @@ void test_sample_configuration() {
         CHECK((statuses.at("fade_demo").sample(1000ms)
             == pixelstatus::Rgb{0x00, 0xA0, 0xFF}));
     }
+}
+
+void test_http_monitor_configuration() {
+    const auto path = std::filesystem::path(PIXELSTATUS_TEST_DATA_DIR)
+        / "http-monitor.example.json";
+    const auto loaded = pixelstatus::load_config_file(path);
+    if (!loaded) {
+        for (const auto& error : loaded.errors) {
+            std::cerr << "monitor config error: " << error << '\n';
+        }
+    }
+    CHECK(loaded);
+    CHECK(loaded.config && loaded.config->monitors.size() == 1U);
+    if (!loaded.config || loaded.config->monitors.empty()) {
+        return;
+    }
+
+    const auto& monitor = loaded.config->monitors.front();
+    CHECK(monitor.id == "replication-lag");
+    CHECK(monitor.interval == 10s);
+    CHECK(monitor.ttl == 30s);
+    CHECK(monitor.evaluation.rules.size() == 3U);
+    CHECK(monitor.evaluation.rules.front().status == "critical");
+    CHECK(monitor.evaluation.rules.front().when.has_value());
+    CHECK(monitor.evaluation.rules.front().when
+        && monitor.evaluation.rules.front().when->operation
+            == pixelstatus::ComparisonOperation::greater_or_equal);
+    CHECK(std::holds_alternative<pixelstatus::HttpMonitorConfig>(monitor.source));
+    const auto& http = std::get<pixelstatus::HttpMonitorConfig>(monitor.source);
+    CHECK(http.url == "http://127.0.0.1:18080/health");
+    CHECK(http.timeout == 2s);
+    CHECK(http.maximum_response_bytes == 4096U);
+    CHECK(http.observation == pixelstatus::HttpObservation::json_pointer);
+    CHECK(http.json_pointer == "/database/replication_lag");
 }
 
 pixelstatus::ApiRequest api_request(
@@ -609,6 +672,53 @@ void test_configuration_rejects_invalid_identifiers() {
     CHECK(!loaded.errors.empty());
 }
 
+void test_configuration_rejects_invalid_monitor() {
+    const auto path = std::filesystem::temp_directory_path()
+        / "pixelstatus-nx-invalid-monitor-test.json";
+    {
+        std::ofstream output(path, std::ios::binary | std::ios::trunc);
+        output << R"({
+          "schema_version": 1,
+          "display": {"width": 1, "height": 1},
+          "statuses": {
+            "ok": {"appearance": {"solid": "#00FF00"}},
+            "communication_failure": {"appearance": {"solid": "#FF00FF"}},
+            "unknown": {"appearance": {"solid": "#000000"}},
+            "stale": {"appearance": {"solid": "#FF8000"}}
+          },
+          "monitors": [
+            {
+              "id": "invalid-monitor",
+              "type": "http",
+              "url": "http://127.0.0.1:99999/health",
+              "interval": "100ms",
+              "observe": {"json_pointer": "not-a-pointer"},
+              "evaluate": [
+                {"otherwise": {"status": "undefined_status"}}
+              ]
+            }
+          ],
+          "indicators": [
+            {"id": "one", "source": "invalid-monitor", "x": 0, "y": 0, "width": 1, "height": 1}
+          ]
+        })";
+    }
+
+    const auto loaded = pixelstatus::load_config_file(path);
+    std::error_code ignored;
+    std::filesystem::remove(path, ignored);
+    CHECK(!loaded);
+    const auto errors_contain = [&loaded](std::string_view text) {
+        return std::any_of(loaded.errors.begin(), loaded.errors.end(), [text](const auto& error) {
+            return error.find(text) != std::string::npos;
+        });
+    };
+    CHECK(errors_contain(".url must be"));
+    CHECK(errors_contain(".interval must be between"));
+    CHECK(errors_contain(".observe.json_pointer is invalid"));
+    CHECK(errors_contain("undefined status"));
+}
+
 void test_configuration_rejects_unknown_fields() {
     const auto path = std::filesystem::temp_directory_path()
         / "pixelstatus-nx-invalid-config-test.json";
@@ -635,21 +745,197 @@ void test_configuration_rejects_unknown_fields() {
     CHECK(!loaded.errors.empty());
 }
 
+#ifdef PIXELSTATUS_TEST_HOST_HTTP
+
+class MockHttpMonitorServer {
+public:
+    MockHttpMonitorServer() {
+        server_.Get("/health", [](const httplib::Request&, httplib::Response& response) {
+            response.set_content(
+                R"({"database":{"replication_lag":12},"healthy":true})",
+                "application/json");
+        });
+        server_.Get("/missing", [](const httplib::Request&, httplib::Response& response) {
+            response.set_content(R"({"database":{}})", "application/json");
+        });
+        server_.Get("/invalid", [](const httplib::Request&, httplib::Response& response) {
+            response.set_content("not-json", "application/json");
+        });
+        server_.Get("/body", [](const httplib::Request&, httplib::Response& response) {
+            response.set_content("service healthy", "text/plain");
+        });
+        server_.Get("/large", [](const httplib::Request&, httplib::Response& response) {
+            response.set_content(std::string(2048U, 'x'), "text/plain");
+        });
+        server_.Get("/unavailable", [](const httplib::Request&, httplib::Response& response) {
+            response.status = 503;
+            response.set_content(R"({"status":"unavailable"})", "application/json");
+        });
+
+        port_ = server_.bind_to_any_port("127.0.0.1");
+        if (port_ <= 0) {
+            throw std::runtime_error("Unable to bind mock HTTP monitor server");
+        }
+        worker_ = std::thread([this] {
+            static_cast<void>(server_.listen_after_bind());
+        });
+        for (int attempt = 0; attempt < 100 && !server_.is_running(); ++attempt) {
+            std::this_thread::sleep_for(1ms);
+        }
+        if (!server_.is_running()) {
+            server_.stop();
+            if (worker_.joinable()) {
+                worker_.join();
+            }
+            throw std::runtime_error("Mock HTTP monitor server did not start");
+        }
+    }
+
+    ~MockHttpMonitorServer() {
+        server_.stop();
+        if (worker_.joinable()) {
+            worker_.join();
+        }
+    }
+
+    MockHttpMonitorServer(const MockHttpMonitorServer&) = delete;
+    MockHttpMonitorServer& operator=(const MockHttpMonitorServer&) = delete;
+
+    [[nodiscard]] std::string url(std::string_view target) const {
+        return "http://127.0.0.1:" + std::to_string(port_) + std::string(target);
+    }
+
+private:
+    httplib::Server server_;
+    int port_{};
+    std::thread worker_;
+};
+
+void test_host_http_monitor_runner() {
+    MockHttpMonitorServer server;
+
+    pixelstatus::HttpMonitorConfig config;
+    config.url = server.url("/health");
+    config.timeout = 1s;
+    config.maximum_response_bytes = 4096U;
+    config.observation = pixelstatus::HttpObservation::json_pointer;
+    config.json_pointer = "/database/replication_lag";
+    auto created = pixelstatus::host::create_http_monitor_runner(config);
+    CHECK(created);
+    auto result = created.runner->run(std::chrono::steady_clock::now());
+    CHECK(result.transport_success);
+    CHECK(result.error == pixelstatus::MonitorError::none);
+    CHECK(std::get<std::int64_t>(result.value) == 12);
+    CHECK(result.detail == "HTTP 200");
+
+    config.url = server.url("/unavailable");
+    config.observation = pixelstatus::HttpObservation::status_code;
+    created = pixelstatus::host::create_http_monitor_runner(config);
+    CHECK(created);
+    result = created.runner->run(std::chrono::steady_clock::now());
+    CHECK(result.transport_success);
+    CHECK(std::get<std::int64_t>(result.value) == 503);
+
+    config.url = server.url("/body");
+    config.observation = pixelstatus::HttpObservation::body;
+    created = pixelstatus::host::create_http_monitor_runner(config);
+    CHECK(created);
+    result = created.runner->run(std::chrono::steady_clock::now());
+    CHECK(result.transport_success);
+    CHECK(std::get<std::string>(result.value) == "service healthy");
+
+    config.url = server.url("/missing");
+    config.observation = pixelstatus::HttpObservation::json_pointer;
+    config.json_pointer = "/database/replication_lag";
+    created = pixelstatus::host::create_http_monitor_runner(config);
+    CHECK(created);
+    result = created.runner->run(std::chrono::steady_clock::now());
+    CHECK(result.transport_success);
+    CHECK(std::holds_alternative<std::monostate>(result.value));
+
+    config.url = server.url("/invalid");
+    created = pixelstatus::host::create_http_monitor_runner(config);
+    CHECK(created);
+    result = created.runner->run(std::chrono::steady_clock::now());
+    CHECK(!result.transport_success);
+    CHECK(result.error == pixelstatus::MonitorError::invalid_response);
+
+    config.url = server.url("/large");
+    config.observation = pixelstatus::HttpObservation::body;
+    config.maximum_response_bytes = 32U;
+    created = pixelstatus::host::create_http_monitor_runner(config);
+    CHECK(created);
+    result = created.runner->run(std::chrono::steady_clock::now());
+    CHECK(!result.transport_success);
+    CHECK(result.error == pixelstatus::MonitorError::response_too_large);
+
+    config.url = "https://example.test/health";
+    CHECK(!pixelstatus::host::create_http_monitor_runner(config));
+    config.url = "http://127.0.0.1:99999/health";
+    CHECK(!pixelstatus::host::create_http_monitor_runner(config));
+
+    const auto example_path = std::filesystem::path(PIXELSTATUS_TEST_DATA_DIR)
+        / "http-monitor.example.json";
+    const auto loaded = pixelstatus::load_config_file(example_path);
+    CHECK(loaded);
+    if (!loaded.config || loaded.config->monitors.empty()) {
+        return;
+    }
+    auto pull = loaded.config->monitors.front();
+    auto http = std::get<pixelstatus::HttpMonitorConfig>(pull.source);
+    http.url = server.url("/health");
+    created = pixelstatus::host::create_http_monitor_runner(std::move(http));
+    CHECK(created);
+
+    pixelstatus::StateStore states;
+    pixelstatus::MonitorEngine engine(states);
+    pixelstatus::MonitorDefinition definition;
+    definition.id = pull.id;
+    definition.interval = pull.interval;
+    definition.ttl = pull.ttl;
+    definition.evaluation = pull.evaluation;
+    const auto now = std::chrono::steady_clock::now();
+    CHECK(engine.add(std::move(definition), std::move(created.runner), now));
+    const auto report = engine.run_due(now);
+    CHECK(report.executed == 1U);
+    CHECK(report.state_updates == 1U);
+    const auto state = states.resolve("replication-lag", std::chrono::steady_clock::now());
+    CHECK(state && state->effective_status == "ok");
+    CHECK(state && std::get<std::int64_t>(state->state.value) == 12);
+
+    pixelstatus::Frame frame(1, 1);
+    const auto render_report = pixelstatus::Renderer(now).render(
+        states,
+        *loaded.config,
+        std::chrono::steady_clock::now(),
+        frame);
+    CHECK(render_report.success);
+    CHECK((*frame.pixel(0, 0) == pixelstatus::Rgb{0x00, 0xC8, 0x53}));
+}
+
+#endif
+
 }  // namespace
 
 int main() {
     test_color_and_duration_parsing();
+    test_http_url_parsing();
     test_frame_bounds();
     test_appearance_sampling();
     test_state_freshness_and_epoch();
     test_renderer();
     test_mi_protocol_vectors();
     test_sample_configuration();
+    test_http_monitor_configuration();
     test_configuration_rejects_unknown_fields();
     test_configuration_rejects_invalid_identifiers();
+    test_configuration_rejects_invalid_monitor();
     test_status_api();
     test_evaluator_comparisons();
     test_monitor_engine();
+#ifdef PIXELSTATUS_TEST_HOST_HTTP
+    test_host_http_monitor_runner();
+#endif
 
     if (failures != 0) {
         std::cerr << failures << " test check(s) failed\n";

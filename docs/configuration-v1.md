@@ -16,6 +16,7 @@ duplicate indicator IDs, and aggregate appearance durations.
     "background": "#080A10"
   },
   "statuses": {},
+  "monitors": [],
   "indicators": []
 }
 ```
@@ -100,6 +101,68 @@ color back to the first. `transition` defaults to `linear` and may be `step`:
 Animation time normally starts when an indicator enters its effective status. TTL
 expiration enters `stale` at the expiry instant and starts the stale appearance at
 that point.
+
+## HTTP Pull Monitors
+
+`monitors` is optional and currently supports the portable `http` monitor shape.
+The desktop adapter performs GET requests; method selection, request bodies, custom
+headers, credentials, and TLS are later increments.
+
+```json
+{
+  "id": "replication-lag",
+  "type": "http",
+  "url": "http://127.0.0.1:18080/health",
+  "interval": "10s",
+  "ttl": "30s",
+  "timeout": "2s",
+  "maximum_response_bytes": 4096,
+  "observe": {
+    "json_pointer": "/database/replication_lag"
+  },
+  "evaluate": [
+    {
+      "when": {
+        "value": {
+          "greater_or_equal": 60
+        }
+      },
+      "status": "critical"
+    },
+    {
+      "otherwise": {
+        "status": "ok"
+      }
+    }
+  ]
+}
+```
+
+Intervals are limited to 1 second through 24 hours, TTL to seven days, and timeout
+to 30 seconds. Response bodies default to 4 KiB and cannot exceed a configured
+64 KiB limit. URLs cannot contain embedded credentials or fragments.
+
+Exactly one observation is selected:
+
+```json
+{"status_code": true}
+{"body": true}
+{"json_pointer": "/path/to/scalar"}
+```
+
+HTTP status responses—including 4xx and 5xx—are successful transport observations.
+This lets a status-code rule classify a service response without confusing it with
+DNS, connection, timeout, or protocol failure. Invalid JSON and selected arrays or
+objects are `invalid_response` transport failures. A missing JSON Pointer produces
+a successful null observation so `exists` and `not_exists` rules can classify it.
+
+Evaluation rules are ordered and the first match wins. Supported value comparisons
+are `exists`, `not_exists`, `equals`, `not_equals`, `contains`, `not_contains`,
+`greater_than`, `greater_or_equal`, `less_than`, `less_or_equal`, and inclusive
+`between`. Every referenced status must exist in the top-level `statuses` map.
+
+The complete runnable shape is in
+[`http-monitor.example.json`](../examples/http-monitor.example.json).
 
 ## Host Status Input
 

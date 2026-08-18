@@ -1,0 +1,91 @@
+{
+  "schema_version": 1,
+  "display": {
+    "width": 1,
+    "height": 1,
+    "background": "#000000"
+  },
+  "statuses": {
+    "ok": {
+      "appearance": {
+        "solid": "#00C853"
+      }
+    },
+    "warn": {
+      "appearance": {
+        "solid": "#FFD600"
+      }
+    },
+    "critical": {
+      "appearance": {
+        "blink": {
+          "color": "#FF1744",
+          "on": "500ms",
+          "off": "500ms"
+        }
+      }
+    },
+    "communication_failure": {
+      "appearance": {
+        "solid": "#FF00FF"
+      }
+    },
+    "stale": {
+      "appearance": {
+        "solid": "#FF9100"
+      }
+    },
+    "unknown": {
+      "appearance": {
+        "solid": "#6200EA"
+      }
+    }
+  },
+  "monitors": [
+    {
+      "id": "replication-lag",
+      "type": "http",
+      "url": "http://127.0.0.1:18080/health",
+      "interval": "10s",
+      "ttl": "30s",
+      "timeout": "2s",
+      "maximum_response_bytes": 4096,
+      "observe": {
+        "json_pointer": "/database/replication_lag"
+      },
+      "evaluate": [
+        {
+          "when": {
+            "value": {
+              "greater_or_equal": 60
+            }
+          },
+          "status": "critical"
+        },
+        {
+          "when": {
+            "value": {
+              "greater_or_equal": 30
+            }
+          },
+          "status": "warn"
+        },
+        {
+          "otherwise": {
+            "status": "ok"
+          }
+        }
+      ]
+    }
+  ],
+  "indicators": [
+    {
+      "id": "replication-lag-indicator",
+      "source": "replication-lag",
+      "x": 0,
+      "y": 0,
+      "width": 1,
+      "height": 1
+    }
+  ]
+}

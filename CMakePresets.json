@@ -14,7 +14,21 @@
       "binaryDir": "${sourceDir}/out/build/windows-debug",
       "cacheVariables": {
         "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+        "PIXELSTATUS_BUILD_HOST_HTTP": "ON",
         "PIXELSTATUS_BUILD_SIMULATOR": "ON",
+        "PIXELSTATUS_BUILD_TESTS": "ON"
+      }
+    },
+    {
+      "name": "windows-core-debug",
+      "displayName": "Windows x64 portable core Debug",
+      "generator": "Visual Studio 17 2022",
+      "architecture": "x64",
+      "binaryDir": "${sourceDir}/out/build/windows-core-debug",
+      "cacheVariables": {
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+        "PIXELSTATUS_BUILD_HOST_HTTP": "OFF",
+        "PIXELSTATUS_BUILD_SIMULATOR": "OFF",
         "PIXELSTATUS_BUILD_TESTS": "ON"
       }
     }
@@ -24,12 +38,25 @@
       "name": "windows-debug",
       "configurePreset": "windows-debug",
       "configuration": "Debug"
+    },
+    {
+      "name": "windows-core-debug",
+      "configurePreset": "windows-core-debug",
+      "configuration": "Debug"
     }
   ],
   "testPresets": [
     {
       "name": "windows-debug",
       "configurePreset": "windows-debug",
+      "configuration": "Debug",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "windows-core-debug",
+      "configurePreset": "windows-core-debug",
       "configuration": "Debug",
       "output": {
         "outputOnFailure": true

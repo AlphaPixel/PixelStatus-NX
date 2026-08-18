@@ -4,6 +4,7 @@ project(PixelStatusNX VERSION 0.1.0 LANGUAGES CXX)
 
 option(PIXELSTATUS_BUILD_SIMULATOR "Build the native desktop simulator" ON)
 option(PIXELSTATUS_BUILD_TESTS "Build host-side tests" ON)
+option(PIXELSTATUS_BUILD_HOST_HTTP "Build the desktop HTTP monitor adapter" ON)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -27,6 +28,7 @@ add_library(pixelstatus_core
     src/core/config.cpp
     src/core/frame.cpp
     src/core/evaluator.cpp
+    src/core/http_url.cpp
     src/core/mi_protocol.cpp
     src/core/monitor.cpp
     src/core/monitor_engine.cpp
@@ -45,11 +47,7 @@ else()
     target_compile_options(pixelstatus_core PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 
-if(PIXELSTATUS_BUILD_SIMULATOR)
-    if(NOT WIN32)
-        message(FATAL_ERROR "The current simulator uses the Win32 API")
-    endif()
-
+if(PIXELSTATUS_BUILD_HOST_HTTP OR PIXELSTATUS_BUILD_SIMULATOR)
     set(HTTPLIB_INSTALL OFF CACHE INTERNAL "")
     set(HTTPLIB_TEST OFF CACHE INTERNAL "")
     set(HTTPLIB_USE_OPENSSL_IF_AVAILABLE OFF CACHE INTERNAL "")
@@ -63,6 +61,31 @@ if(PIXELSTATUS_BUILD_SIMULATOR)
         DOWNLOAD_EXTRACT_TIMESTAMP TRUE
     )
     FetchContent_MakeAvailable(cpp_httplib)
+endif()
+
+if(PIXELSTATUS_BUILD_HOST_HTTP)
+    add_library(pixelstatus_host_http src/host/http_monitor_runner.cpp)
+    target_include_directories(pixelstatus_host_http PUBLIC include)
+    target_link_libraries(pixelstatus_host_http PRIVATE
+        pixelstatus_core
+        httplib::httplib
+        nlohmann_json::nlohmann_json
+    )
+
+    if(MSVC)
+        target_compile_options(pixelstatus_host_http PRIVATE /W4 /permissive-)
+    else()
+        target_compile_options(pixelstatus_host_http PRIVATE -Wall -Wextra -Wpedantic)
+    endif()
+endif()
+
+if(PIXELSTATUS_BUILD_SIMULATOR)
+    if(NOT WIN32)
+        message(FATAL_ERROR "The current simulator uses the Win32 API")
+    endif()
+    if(NOT PIXELSTATUS_BUILD_HOST_HTTP)
+        message(FATAL_ERROR "The simulator requires PIXELSTATUS_BUILD_HOST_HTTP")
+    endif()
 
     add_executable(pixelstatus_simulator
         src/simulator/http_status_server.cpp
@@ -72,6 +95,7 @@ if(PIXELSTATUS_BUILD_SIMULATOR)
     target_include_directories(pixelstatus_simulator PRIVATE src/simulator)
     target_link_libraries(pixelstatus_simulator PRIVATE
         pixelstatus_core
+        pixelstatus_host_http
         httplib::httplib
         user32
         gdi32
@@ -91,6 +115,9 @@ if(PIXELSTATUS_BUILD_SIMULATOR)
             ${CMAKE_CURRENT_SOURCE_DIR}/examples/pixelstatus.sample.json
             $<TARGET_FILE_DIR:pixelstatus_simulator>/pixelstatus.sample.json
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            ${CMAKE_CURRENT_SOURCE_DIR}/examples/http-monitor.example.json
+            $<TARGET_FILE_DIR:pixelstatus_simulator>/http-monitor.example.json
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
             ${CMAKE_CURRENT_SOURCE_DIR}/THIRD_PARTY_NOTICES.md
             $<TARGET_FILE_DIR:pixelstatus_simulator>/THIRD_PARTY_NOTICES.md
         VERBATIM
@@ -105,6 +132,15 @@ if(PIXELSTATUS_BUILD_TESTS)
     target_compile_definitions(pixelstatus_tests PRIVATE
         PIXELSTATUS_TEST_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/examples"
     )
+    if(PIXELSTATUS_BUILD_HOST_HTTP)
+        target_link_libraries(pixelstatus_tests PRIVATE
+            pixelstatus_host_http
+            httplib::httplib
+        )
+        target_compile_definitions(pixelstatus_tests PRIVATE
+            PIXELSTATUS_TEST_HOST_HTTP=1
+        )
+    endif()
 
     if(MSVC)
         target_compile_options(pixelstatus_tests PRIVATE /W4 /permissive-)

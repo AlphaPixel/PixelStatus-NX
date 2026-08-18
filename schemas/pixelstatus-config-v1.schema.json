@@ -32,6 +32,13 @@
         "$ref": "#/$defs/status"
       }
     },
+    "monitors": {
+      "type": "array",
+      "maxItems": 256,
+      "items": {
+        "$ref": "#/$defs/httpMonitor"
+      }
+    },
     "indicators": {
       "type": "array",
       "minItems": 1,
@@ -82,6 +89,193 @@
         },
         "duration": {
           "$ref": "#/$defs/positiveDuration"
+        }
+      }
+    },
+    "scalarValue": {
+      "type": [
+        "null",
+        "boolean",
+        "number",
+        "string"
+      ]
+    },
+    "valueComparison": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["exists"],
+          "properties": {"exists": {"const": true}}
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["not_exists"],
+          "properties": {"not_exists": {"const": true}}
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["equals"],
+          "properties": {"equals": {"$ref": "#/$defs/scalarValue"}}
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["not_equals"],
+          "properties": {"not_equals": {"$ref": "#/$defs/scalarValue"}}
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["contains"],
+          "properties": {"contains": {"type": "string"}}
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["not_contains"],
+          "properties": {"not_contains": {"type": "string"}}
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["greater_than"],
+          "properties": {"greater_than": {"type": "number"}}
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["greater_or_equal"],
+          "properties": {"greater_or_equal": {"type": "number"}}
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["less_than"],
+          "properties": {"less_than": {"type": "number"}}
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["less_or_equal"],
+          "properties": {"less_or_equal": {"type": "number"}}
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["between"],
+          "properties": {
+            "between": {
+              "type": "array",
+              "minItems": 2,
+              "maxItems": 2,
+              "items": {"type": "number"}
+            }
+          }
+        }
+      ]
+    },
+    "evaluationRule": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["when", "status"],
+          "properties": {
+            "when": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["value"],
+              "properties": {
+                "value": {"$ref": "#/$defs/valueComparison"}
+              }
+            },
+            "status": {"$ref": "#/$defs/identifier"}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["otherwise"],
+          "properties": {
+            "otherwise": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["status"],
+              "properties": {
+                "status": {"$ref": "#/$defs/identifier"}
+              }
+            }
+          }
+        }
+      ]
+    },
+    "httpObservation": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["status_code"],
+          "properties": {"status_code": {"const": true}}
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["body"],
+          "properties": {"body": {"const": true}}
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["json_pointer"],
+          "properties": {
+            "json_pointer": {
+              "type": "string",
+              "maxLength": 512,
+              "pattern": "^$|^/"
+            }
+          }
+        }
+      ]
+    },
+    "httpMonitor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "type",
+        "url",
+        "interval",
+        "observe",
+        "evaluate"
+      ],
+      "properties": {
+        "id": {"$ref": "#/$defs/identifier"},
+        "type": {"const": "http"},
+        "url": {
+          "type": "string",
+          "maxLength": 2048,
+          "pattern": "^https?://"
+        },
+        "interval": {"$ref": "#/$defs/positiveDuration"},
+        "ttl": {"$ref": "#/$defs/positiveDuration"},
+        "timeout": {"$ref": "#/$defs/positiveDuration"},
+        "maximum_response_bytes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65536,
+          "default": 4096
+        },
+        "observe": {"$ref": "#/$defs/httpObservation"},
+        "transport_failure_status": {"$ref": "#/$defs/identifier"},
+        "no_match_status": {"$ref": "#/$defs/identifier"},
+        "evaluate": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 32,
+          "items": {"$ref": "#/$defs/evaluationRule"}
         }
       }
     },

@@ -3,6 +3,8 @@
 
 #include "pixelstatus/config.hpp"
 #include "pixelstatus/frame.hpp"
+#include "pixelstatus/host/http_monitor_runner.hpp"
+#include "pixelstatus/monitor_engine.hpp"
 #include "pixelstatus/renderer.hpp"
 #include "pixelstatus/state.hpp"
 #include "pixelstatus/status_api.hpp"
@@ -178,6 +180,40 @@ int main(int argc, char** argv) {
         }
     }
 
+    pixelstatus::MonitorEngine monitor_engine(states);
+    for (const auto& configured : config.monitors) {
+        auto created = pixelstatus::host::create_http_monitor_runner(
+            std::get<pixelstatus::HttpMonitorConfig>(configured.source));
+        if (!created) {
+            std::cerr << "Unable to create monitor " << configured.id
+                      << ": " << created.error << '\n';
+            return 1;
+        }
+
+        pixelstatus::MonitorDefinition definition;
+        definition.id = configured.id;
+        definition.interval = configured.interval;
+        definition.ttl = configured.ttl;
+        definition.evaluation = configured.evaluation;
+        const auto registered = monitor_engine.add(
+            std::move(definition), std::move(created.runner), started_at);
+        if (!registered) {
+            std::cerr << "Unable to register monitor " << configured.id
+                      << ": " << registered.error << '\n';
+            return 1;
+        }
+    }
+    std::jthread monitor_worker;
+    if (monitor_engine.size() != 0U) {
+        monitor_worker = std::jthread([&monitor_engine](std::stop_token stop) {
+            while (!stop.stop_requested()) {
+                static_cast<void>(monitor_engine.run_due(
+                    std::chrono::steady_clock::now(), 1U));
+                std::this_thread::sleep_for(10ms);
+            }
+        });
+    }
+
     std::unique_ptr<pixelstatus::StatusApi> status_api;
     std::unique_ptr<pixelstatus::simulator::HttpStatusServer> http_server;
     if (options->api_enabled) {
@@ -205,9 +241,13 @@ int main(int argc, char** argv) {
     bool first_source_failed = false;
 
     std::cout << "Loaded " << options->config_path << '\n'
-              << "The first region changes status every four seconds.\n"
               << "The final region becomes stale after six seconds.\n"
               << "Close the simulator window to exit.\n";
+    if (config.monitors.empty()) {
+        std::cout << "The first region changes status every four seconds.\n";
+    } else {
+        std::cout << "Configured pull monitors: " << config.monitors.size() << '\n';
+    }
 
     while (display.process_events()) {
         const auto now = std::chrono::steady_clock::now();
@@ -218,7 +258,7 @@ int main(int argc, char** argv) {
             std::cerr << "Status API failure: " << http_server->error() << '\n';
             return 1;
         }
-        if (!sources.empty() && now >= next_transition) {
+        if (config.monitors.empty() && !sources.empty() && now >= next_transition) {
             first_source_failed = !first_source_failed;
             pixelstatus::MonitorState state;
             state.id = sources.front();

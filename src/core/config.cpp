@@ -1,9 +1,11 @@
 #include "pixelstatus/config.hpp"
+#include "pixelstatus/http_url.hpp"
 #include "pixelstatus/validation.hpp"
 
 #include <nlohmann/json.hpp>
 
 #include <charconv>
+#include <cmath>
 #include <cstdint>
 #include <fstream>
 #include <initializer_list>
@@ -20,7 +22,16 @@ constexpr std::size_t maximum_dimension = 256U;
 constexpr std::size_t maximum_pixels = 65'536U;
 constexpr std::size_t maximum_indicators = 1'024U;
 constexpr std::size_t maximum_statuses = 256U;
+constexpr std::size_t maximum_monitors = 256U;
 constexpr Duration maximum_appearance_duration = std::chrono::hours(24);
+constexpr Duration minimum_monitor_interval = std::chrono::seconds(1);
+constexpr Duration maximum_monitor_interval = std::chrono::hours(24);
+constexpr Duration maximum_monitor_ttl = std::chrono::hours(24 * 7);
+constexpr Duration maximum_monitor_timeout = std::chrono::seconds(30);
+constexpr std::size_t maximum_monitor_rules = 32U;
+constexpr std::size_t maximum_monitor_response_bytes = 64U * 1024U;
+constexpr std::size_t maximum_url_bytes = 2U * 1024U;
+constexpr std::size_t maximum_json_pointer_bytes = 512U;
 
 void add_error(ConfigLoadResult& result, std::string message) {
     result.errors.push_back(std::move(message));
@@ -77,6 +88,25 @@ void reject_unknown_fields(
         return std::nullopt;
     }
     return value;
+}
+
+[[nodiscard]] std::optional<std::string> optional_identifier(
+    const Json& object,
+    std::string_view key,
+    std::string_view path,
+    ConfigLoadResult& result) {
+    const auto found = object.find(key);
+    if (found == object.end()) {
+        return std::nullopt;
+    }
+    if (!found->is_string() || !is_valid_identifier(found->get_ref<const std::string&>())) {
+        add_error(
+            result,
+            std::string(path) + "." + std::string(key)
+                + " must contain 1-64 letters, digits, dots, underscores, or hyphens");
+        return std::nullopt;
+    }
+    return found->get<std::string>();
 }
 
 [[nodiscard]] std::optional<std::size_t> bounded_size(
@@ -141,6 +171,27 @@ void reject_unknown_fields(
     if (!duration || *duration <= Duration::zero()
         || *duration > maximum_appearance_duration) {
         add_error(result, std::string(path) + " must be greater than zero and no more than 24h");
+        return std::nullopt;
+    }
+    return duration;
+}
+
+[[nodiscard]] std::optional<Duration> bounded_duration_value(
+    const Json& value,
+    std::string_view path,
+    Duration minimum,
+    Duration maximum,
+    ConfigLoadResult& result) {
+    if (!value.is_string()) {
+        add_error(result, std::string(path) + " must be a duration string");
+        return std::nullopt;
+    }
+    const auto duration = parse_duration(value.get_ref<const std::string&>());
+    if (!duration || *duration < minimum || *duration > maximum) {
+        add_error(
+            result,
+            std::string(path) + " must be between " + std::to_string(minimum.count())
+                + "ms and " + std::to_string(maximum.count()) + "ms");
         return std::nullopt;
     }
     return duration;
@@ -473,6 +524,376 @@ struct ParsedSteps {
     return std::nullopt;
 }
 
+[[nodiscard]] std::optional<StateValue> scalar_state_value(
+    const Json& value,
+    std::string_view path,
+    ConfigLoadResult& result) {
+    if (value.is_null()) {
+        return StateValue{};
+    }
+    if (value.is_boolean()) {
+        return StateValue{value.get<bool>()};
+    }
+    if (value.is_number_integer()) {
+        if (value.is_number_unsigned()) {
+            const auto number = value.get<std::uint64_t>();
+            if (number > static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max())) {
+                add_error(result, std::string(path) + " integer is out of range");
+                return std::nullopt;
+            }
+            return StateValue{static_cast<std::int64_t>(number)};
+        }
+        return StateValue{value.get<std::int64_t>()};
+    }
+    if (value.is_number_float()) {
+        const auto number = value.get<double>();
+        if (!std::isfinite(number)) {
+            add_error(result, std::string(path) + " number must be finite");
+            return std::nullopt;
+        }
+        return StateValue{number};
+    }
+    if (value.is_string()) {
+        return StateValue{value.get<std::string>()};
+    }
+    add_error(result, std::string(path) + " must be a scalar JSON value");
+    return std::nullopt;
+}
+
+[[nodiscard]] std::optional<ComparisonOperation> comparison_operation(
+    std::string_view name) {
+    if (name == "exists") {
+        return ComparisonOperation::exists;
+    }
+    if (name == "not_exists") {
+        return ComparisonOperation::not_exists;
+    }
+    if (name == "equals") {
+        return ComparisonOperation::equals;
+    }
+    if (name == "not_equals") {
+        return ComparisonOperation::not_equals;
+    }
+    if (name == "contains") {
+        return ComparisonOperation::contains;
+    }
+    if (name == "not_contains") {
+        return ComparisonOperation::not_contains;
+    }
+    if (name == "greater_than") {
+        return ComparisonOperation::greater_than;
+    }
+    if (name == "greater_or_equal") {
+        return ComparisonOperation::greater_or_equal;
+    }
+    if (name == "less_than") {
+        return ComparisonOperation::less_than;
+    }
+    if (name == "less_or_equal") {
+        return ComparisonOperation::less_or_equal;
+    }
+    if (name == "between") {
+        return ComparisonOperation::between;
+    }
+    return std::nullopt;
+}
+
+[[nodiscard]] std::optional<EvaluationCondition> parse_evaluation_condition(
+    const Json& when,
+    std::string_view path,
+    ConfigLoadResult& result) {
+    if (!when.is_object() || when.size() != 1U || !when.contains("value")
+        || !when["value"].is_object() || when["value"].size() != 1U) {
+        add_error(
+            result,
+            std::string(path) + " must contain exactly one value comparison");
+        return std::nullopt;
+    }
+
+    const auto& comparison = when["value"];
+    const auto field = comparison.begin();
+    const auto operation = comparison_operation(field.key());
+    if (!operation) {
+        add_error(result, std::string(path) + ".value contains an unknown comparison");
+        return std::nullopt;
+    }
+
+    EvaluationCondition condition;
+    condition.operation = *operation;
+    const auto operand_path = std::string(path) + ".value." + field.key();
+    if (*operation == ComparisonOperation::exists
+        || *operation == ComparisonOperation::not_exists) {
+        if (!field.value().is_boolean() || !field.value().get<bool>()) {
+            add_error(result, operand_path + " must be true");
+            return std::nullopt;
+        }
+        return condition;
+    }
+    if (*operation == ComparisonOperation::between) {
+        if (!field.value().is_array() || field.value().size() != 2U) {
+            add_error(result, operand_path + " must contain two numeric bounds");
+            return std::nullopt;
+        }
+        const auto lower = scalar_state_value(field.value()[0], operand_path + "[0]", result);
+        const auto upper = scalar_state_value(field.value()[1], operand_path + "[1]", result);
+        if (!lower || !upper) {
+            return std::nullopt;
+        }
+        condition.expected = *lower;
+        condition.upper_bound = *upper;
+        return condition;
+    }
+
+    const auto operand = scalar_state_value(field.value(), operand_path, result);
+    if (!operand) {
+        return std::nullopt;
+    }
+    condition.expected = *operand;
+    return condition;
+}
+
+[[nodiscard]] bool status_is_defined(
+    std::string_view status,
+    const std::unordered_map<std::string, TimelineAppearance>& statuses) {
+    return statuses.find(std::string(status)) != statuses.end();
+}
+
+[[nodiscard]] std::optional<EvaluationPolicy> parse_evaluation_policy(
+    const Json& monitor,
+    std::string_view path,
+    const std::unordered_map<std::string, TimelineAppearance>& statuses,
+    ConfigLoadResult& result) {
+    EvaluationPolicy policy;
+    if (const auto status = optional_identifier(
+            monitor, "transport_failure_status", path, result)) {
+        policy.transport_failure_status = *status;
+    }
+    if (const auto status = optional_identifier(monitor, "no_match_status", path, result)) {
+        policy.no_match_status = *status;
+    }
+
+    const auto evaluate = monitor.find("evaluate");
+    if (evaluate == monitor.end() || !evaluate->is_array() || evaluate->empty()
+        || evaluate->size() > maximum_monitor_rules) {
+        add_error(
+            result,
+            std::string(path) + ".evaluate must contain between 1 and 32 rules");
+        return std::nullopt;
+    }
+
+    for (std::size_t index = 0; index < evaluate->size(); ++index) {
+        const auto& rule = (*evaluate)[index];
+        const auto rule_path = std::string(path) + ".evaluate[" + std::to_string(index) + "]";
+        if (!rule.is_object()) {
+            add_error(result, rule_path + " must be an object");
+            continue;
+        }
+
+        if (rule.contains("when")) {
+            reject_unknown_fields(rule, {"when", "status"}, rule_path, result);
+            const auto status = required_identifier(rule, "status", rule_path, result);
+            const auto condition = parse_evaluation_condition(rule["when"], rule_path + ".when", result);
+            if (status && condition) {
+                policy.rules.push_back({*condition, *status});
+            }
+            continue;
+        }
+        if (rule.contains("otherwise")) {
+            reject_unknown_fields(rule, {"otherwise"}, rule_path, result);
+            const auto& otherwise = rule["otherwise"];
+            if (!otherwise.is_object()) {
+                add_error(result, rule_path + ".otherwise must be an object");
+                continue;
+            }
+            reject_unknown_fields(otherwise, {"status"}, rule_path + ".otherwise", result);
+            const auto status = required_identifier(
+                otherwise, "status", rule_path + ".otherwise", result);
+            if (status) {
+                policy.rules.push_back({std::nullopt, *status});
+            }
+            continue;
+        }
+        add_error(result, rule_path + " must define when or otherwise");
+    }
+
+    const Evaluator evaluator;
+    if (const auto error = evaluator.validate(policy)) {
+        add_error(result, std::string(path) + ".evaluate: " + *error);
+        return std::nullopt;
+    }
+    if (!status_is_defined(policy.transport_failure_status, statuses)) {
+        add_error(
+            result,
+            std::string(path) + ".transport_failure_status is not defined in statuses");
+    }
+    if (!status_is_defined(policy.no_match_status, statuses)) {
+        add_error(result, std::string(path) + ".no_match_status is not defined in statuses");
+    }
+    for (std::size_t index = 0; index < policy.rules.size(); ++index) {
+        if (!status_is_defined(policy.rules[index].status, statuses)) {
+            add_error(
+                result,
+                std::string(path) + ".evaluate[" + std::to_string(index)
+                    + "] refers to an undefined status");
+        }
+    }
+    return policy;
+}
+
+[[nodiscard]] bool valid_http_url(std::string_view url) {
+    return url.size() <= maximum_url_bytes && parse_http_url(url).has_value();
+}
+
+[[nodiscard]] bool valid_json_pointer(std::string_view pointer) {
+    if (pointer.size() > maximum_json_pointer_bytes
+        || (!pointer.empty() && pointer.front() != '/')) {
+        return false;
+    }
+    for (std::size_t index = 0; index < pointer.size(); ++index) {
+        if (pointer[index] == '~') {
+            if (++index >= pointer.size()
+                || (pointer[index] != '0' && pointer[index] != '1')) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+[[nodiscard]] std::optional<HttpMonitorConfig> parse_http_monitor(
+    const Json& monitor,
+    std::string_view path,
+    ConfigLoadResult& result) {
+    const auto url = required_string(monitor, "url", path, result);
+    const auto url_valid = url && valid_http_url(*url);
+    if (url && !url_valid) {
+        add_error(
+            result,
+            std::string(path)
+                + ".url must be an http:// or https:// URL without credentials or a fragment");
+    }
+
+    HttpMonitorConfig config;
+    if (url) {
+        config.url = *url;
+    }
+    if (const auto field = monitor.find("timeout"); field != monitor.end()) {
+        const auto timeout = bounded_duration_value(
+            *field, std::string(path) + ".timeout", Duration{1}, maximum_monitor_timeout, result);
+        if (timeout) {
+            config.timeout = *timeout;
+        }
+    }
+    if (monitor.contains("maximum_response_bytes")) {
+        const auto maximum = bounded_size(
+            monitor,
+            "maximum_response_bytes",
+            path,
+            1U,
+            maximum_monitor_response_bytes,
+            result);
+        if (maximum) {
+            config.maximum_response_bytes = *maximum;
+        }
+    }
+
+    const auto observe = monitor.find("observe");
+    if (observe == monitor.end() || !observe->is_object() || observe->size() != 1U) {
+        add_error(result, std::string(path) + ".observe must define exactly one observation");
+        return std::nullopt;
+    }
+    if (observe->contains("status_code")) {
+        if (!(*observe)["status_code"].is_boolean()
+            || !(*observe)["status_code"].get<bool>()) {
+            add_error(result, std::string(path) + ".observe.status_code must be true");
+            return std::nullopt;
+        }
+        config.observation = HttpObservation::status_code;
+    } else if (observe->contains("body")) {
+        if (!(*observe)["body"].is_boolean() || !(*observe)["body"].get<bool>()) {
+            add_error(result, std::string(path) + ".observe.body must be true");
+            return std::nullopt;
+        }
+        config.observation = HttpObservation::body;
+    } else if (observe->contains("json_pointer")) {
+        const auto& pointer = (*observe)["json_pointer"];
+        if (!pointer.is_string()
+            || !valid_json_pointer(pointer.get_ref<const std::string&>())) {
+            add_error(result, std::string(path) + ".observe.json_pointer is invalid");
+            return std::nullopt;
+        }
+        config.observation = HttpObservation::json_pointer;
+        config.json_pointer = pointer.get<std::string>();
+    } else {
+        add_error(result, std::string(path) + ".observe contains an unknown observation");
+        return std::nullopt;
+    }
+    if (!url_valid) {
+        return std::nullopt;
+    }
+    return config;
+}
+
+[[nodiscard]] std::optional<PullMonitorConfig> parse_pull_monitor(
+    const Json& monitor,
+    std::string_view path,
+    const std::unordered_map<std::string, TimelineAppearance>& statuses,
+    ConfigLoadResult& result) {
+    if (!monitor.is_object()) {
+        add_error(result, std::string(path) + " must be an object");
+        return std::nullopt;
+    }
+    reject_unknown_fields(
+        monitor,
+        {
+            "id", "type", "url", "interval", "ttl", "timeout",
+            "maximum_response_bytes", "observe", "evaluate",
+            "transport_failure_status", "no_match_status",
+        },
+        path,
+        result);
+
+    const auto id = required_identifier(monitor, "id", path, result);
+    const auto type = required_string(monitor, "type", path, result);
+    if (type && *type != "http") {
+        add_error(result, std::string(path) + ".type must currently be http");
+    }
+    const auto interval_field = monitor.find("interval");
+    if (interval_field == monitor.end()) {
+        add_error(result, std::string(path) + ".interval is required");
+    }
+    const auto interval = interval_field == monitor.end()
+        ? std::optional<Duration>{}
+        : bounded_duration_value(
+            *interval_field,
+            std::string(path) + ".interval",
+            minimum_monitor_interval,
+            maximum_monitor_interval,
+            result);
+
+    std::optional<Duration> ttl;
+    bool ttl_valid = true;
+    if (const auto field = monitor.find("ttl"); field != monitor.end()) {
+        ttl = bounded_duration_value(
+            *field, std::string(path) + ".ttl", Duration{1}, maximum_monitor_ttl, result);
+        ttl_valid = ttl.has_value();
+    }
+    const auto evaluation = parse_evaluation_policy(monitor, path, statuses, result);
+    const auto http = parse_http_monitor(monitor, path, result);
+    if (!id || !type || *type != "http" || !interval || !ttl_valid
+        || !evaluation || !http) {
+        return std::nullopt;
+    }
+
+    PullMonitorConfig config;
+    config.id = *id;
+    config.interval = *interval;
+    config.ttl = ttl;
+    config.evaluation = *evaluation;
+    config.source = *http;
+    return config;
+}
+
 }  // namespace
 
 std::optional<Duration> parse_duration(std::string_view value) {
@@ -540,7 +961,7 @@ ConfigLoadResult load_config_file(const std::filesystem::path& path) {
     try {
         reject_unknown_fields(
             root,
-            {"schema_version", "display", "statuses", "indicators"},
+            {"schema_version", "display", "statuses", "monitors", "indicators"},
             "configuration",
             result);
         const auto schema = root.find("schema_version");
@@ -604,6 +1025,28 @@ ConfigLoadResult load_config_file(const std::filesystem::path& path) {
             }
             if (!statuses->contains("stale")) {
                 add_error(result, "statuses.stale is required");
+            }
+        }
+
+        if (const auto monitors = root.find("monitors"); monitors != root.end()) {
+            if (!monitors->is_array() || monitors->size() > maximum_monitors) {
+                add_error(result, "monitors must be an array with no more than 256 entries");
+            } else {
+                std::unordered_set<std::string> ids;
+                for (std::size_t index = 0; index < monitors->size(); ++index) {
+                    const auto path_text = std::string("monitors[")
+                        + std::to_string(index) + "]";
+                    auto monitor = parse_pull_monitor(
+                        (*monitors)[index], path_text, config.statuses, result);
+                    if (!monitor) {
+                        continue;
+                    }
+                    if (!ids.insert(monitor->id).second) {
+                        add_error(result, path_text + ".id duplicates an earlier monitor");
+                        continue;
+                    }
+                    config.monitors.push_back(std::move(*monitor));
+                }
             }
         }
 

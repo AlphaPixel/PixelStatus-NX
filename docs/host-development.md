@@ -17,6 +17,15 @@ cmake --build --preset windows-debug
 ctest --preset windows-debug
 ```
 
+To compile and test only the portable core without the desktop HTTP adapter or
+Win32 simulator, use the companion preset:
+
+```powershell
+cmake --preset windows-core-debug
+cmake --build --preset windows-core-debug
+ctest --preset windows-core-debug
+```
+
 The equivalent one-command workflow is:
 
 ```powershell
@@ -28,6 +37,16 @@ After building, run the repeatable simulator/API integration smoke test with:
 ```powershell
 .\tools\test-host-api.ps1
 ```
+
+The pull-monitor smoke test starts a local Python HTTP fixture and confirms that the
+configured Win32 simulator publishes its JSON-derived state through the status API:
+
+```powershell
+.\tools\test-host-monitor.ps1
+```
+
+Python is used only for the mock upstream endpoint; the monitor implementation and
+all application behavior under test are C++20.
 
 CMake downloads the pinned `nlohmann/json` 3.12.0 and `cpp-httplib` 0.51.0
 releases into the ignored build tree. No dependency is installed globally.
@@ -106,11 +125,16 @@ See [Configuration V1](configuration-v1.md) for the status and appearance model.
 
 ## Portable Pull-Monitor Foundation
 
-The core library now also contains host-tested runner, evaluator, and deterministic
-interval-engine contracts. Scripted runners exercise the complete path from a due
-monitor through threshold evaluation, state publication, TTL, and rendering without
-performing network I/O. See [Host Monitor Engine](monitor-engine.md) for comparison
-semantics, scheduling behavior, and the concrete runners still to be added.
+The core library contains host-tested runner, evaluator, and deterministic
+interval-engine contracts. Scripted runners exercise time and failure edge cases;
+an in-process loopback server tests the concrete HTTP/JSON adapter through state
+publication, TTL, and rendering. See [Host Monitor Engine](monitor-engine.md) for
+comparison and scheduling semantics.
+
+The simulator automatically registers an optional `monitors` array from its JSON
+configuration and executes those monitors serially on a background thread. See
+[`http-monitor.example.json`](../examples/http-monitor.example.json) for a complete
+configuration targeting a local test endpoint.
 
 The simulator supports:
 
@@ -141,6 +165,6 @@ scheduling.
 
 The host build does not include ESP-IDF, a cross-compiler, NimBLE transport, Wi-Fi,
 NVS, LittleFS, GPIO, or OTA support. MI packet construction is host-tested, but actual
-BLE behavior remains a hardware validation task. Concrete pull transports and their
-JSON configuration are also deferred; their portable execution contracts are now in
-place and tested.
+BLE behavior remains a hardware validation task. HTTPS and additional pull
+transports remain deferred; HTTP GET, scalar JSON extraction, evaluation, and
+interval execution are implemented and host-tested.

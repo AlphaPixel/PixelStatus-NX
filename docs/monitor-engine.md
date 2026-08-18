@@ -11,9 +11,10 @@ due interval
     -> Renderer
 ```
 
-It contains no sockets, operating-system APIs, threads, ESP-IDF types, or wall-clock
-dependencies. Tests drive it with explicit steady-clock time points and scripted
-runners, so scheduling and status transitions are deterministic on the desktop.
+The engine itself contains no sockets, operating-system APIs, threads, ESP-IDF
+types, or wall-clock dependencies. Tests drive it with explicit steady-clock time
+points and scripted runners, so scheduling and status transitions are deterministic
+on the desktop. Concrete transports remain separate runner adapters.
 
 ## Runner Contract
 
@@ -72,12 +73,26 @@ This is intentional for a resource-constrained appliance: current health matters
 more than recreating obsolete checks.
 
 The current synchronous executor is the deterministic reference implementation.
-A bounded host or FreeRTOS worker queue can consume the same runner jobs later;
-completion still passes through the evaluator and state store contracts.
+The Win32 simulator pumps it from one background thread with at most one active
+monitor request, keeping network timeouts away from the display event loop. A later
+bounded host or FreeRTOS worker queue can increase concurrency without changing
+completion through the evaluator and state store contracts.
+
+## Desktop HTTP Adapter
+
+The first concrete runner performs bounded HTTP GET requests and can observe the
+response status code, complete body, or a scalar selected by RFC 6901 JSON Pointer.
+It enforces connection/read/write/overall timeouts, disables redirects, rejects URL
+credentials, and streams response data through an explicit byte limit.
+
+The adapter intentionally distinguishes valid HTTP responses from transport errors.
+For example, HTTP 503 can be evaluated as an integer observation, while an invalid
+JSON document selected by a JSON monitor becomes `invalid_response` and maps through
+the transport-failure status.
 
 ## Deliberately Deferred
 
-This increment does not add monitor JSON syntax, concrete DNS/TCP/HTTP runners,
-jitter, cron scheduling, cancellation, or a worker pool. Keeping those out until
-the normalized result and evaluation behavior are stable prevents transport details
-from leaking into scheduling or rendering.
+HTTPS, custom request methods/headers/bodies, DNS/TCP-specific runners, jitter, cron
+scheduling, cancellation, and a multi-worker executor remain deferred. HTTPS URLs
+are valid portable configuration, but the current desktop factory rejects them at
+startup because this build deliberately does not link a TLS library.
