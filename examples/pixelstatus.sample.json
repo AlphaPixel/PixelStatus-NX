@@ -1,0 +1,77 @@
+{
+  "schema_version": 1,
+  "display": {
+    "width": 16,
+    "height": 16,
+    "background": "#080A10"
+  },
+  "statuses": {
+    "ok": {
+      "appearance": {
+        "solid": "#00C853"
+      }
+    },
+    "info": {
+      "appearance": {
+        "solid": "#2979FF"
+      }
+    },
+    "fail": {
+      "appearance": {
+        "blink": {
+          "color": "#FF1744",
+          "on": "500ms",
+          "off": "500ms"
+        }
+      }
+    },
+    "stale": {
+      "appearance": {
+        "blink": {
+          "color": "#FF9100",
+          "on": "250ms",
+          "off": "750ms"
+        }
+      }
+    },
+    "unknown": {
+      "appearance": {
+        "solid": "#D500F9"
+      }
+    }
+  },
+  "indicators": [
+    {
+      "id": "internet-region",
+      "source": "internet",
+      "x": 0,
+      "y": 0,
+      "width": 8,
+      "height": 8
+    },
+    {
+      "id": "build-region",
+      "source": "build",
+      "x": 8,
+      "y": 0,
+      "width": 8,
+      "height": 8
+    },
+    {
+      "id": "backup-region",
+      "source": "backup",
+      "x": 0,
+      "y": 8,
+      "width": 8,
+      "height": 8
+    },
+    {
+      "id": "freshness-region",
+      "source": "freshness-demo",
+      "x": 8,
+      "y": 8,
+      "width": 8,
+      "height": 8
+    }
+  ]
+}

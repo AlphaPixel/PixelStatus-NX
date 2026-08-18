@@ -1,0 +1,170 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pixelstatus-nx.local/schemas/pixelstatus-config-v1.schema.json",
+  "title": "PixelStatus NX configuration version 1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "display",
+    "statuses",
+    "indicators"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "display": {
+      "$ref": "#/$defs/display"
+    },
+    "statuses": {
+      "type": "object",
+      "minProperties": 2,
+      "maxProperties": 256,
+      "required": [
+        "unknown",
+        "stale"
+      ],
+      "additionalProperties": {
+        "$ref": "#/$defs/status"
+      }
+    },
+    "indicators": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 1024,
+      "items": {
+        "$ref": "#/$defs/indicator"
+      }
+    }
+  },
+  "$defs": {
+    "color": {
+      "type": "string",
+      "pattern": "^#[0-9A-Fa-f]{6}$"
+    },
+    "positiveDuration": {
+      "type": "string",
+      "pattern": "^[1-9][0-9]*(ms|s|m|h)$"
+    },
+    "display": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "width",
+        "height"
+      ],
+      "properties": {
+        "width": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 256
+        },
+        "height": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 256
+        },
+        "background": {
+          "$ref": "#/$defs/color"
+        }
+      }
+    },
+    "status": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "appearance"
+      ],
+      "properties": {
+        "appearance": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "solid"
+              ],
+              "properties": {
+                "solid": {
+                  "$ref": "#/$defs/color"
+                }
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "blink"
+              ],
+              "properties": {
+                "blink": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "color",
+                    "on",
+                    "off"
+                  ],
+                  "properties": {
+                    "color": {
+                      "$ref": "#/$defs/color"
+                    },
+                    "on": {
+                      "$ref": "#/$defs/positiveDuration"
+                    },
+                    "off": {
+                      "$ref": "#/$defs/positiveDuration"
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    "indicator": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "source",
+        "x",
+        "y",
+        "width",
+        "height"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "source": {
+          "type": "string",
+          "minLength": 1
+        },
+        "x": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 256
+        },
+        "y": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 256
+        },
+        "width": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 256
+        },
+        "height": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 256
+        }
+      }
+    }
+  }
+}

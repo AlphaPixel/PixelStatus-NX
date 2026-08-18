@@ -14,6 +14,11 @@ PixelStatus NX is deliberately **not** intended to become a general-purpose moni
 
 The current target hardware includes an ESP32 and a **16×16 RGB Bluetooth-connected display**, but neither the monitoring system nor rendering architecture should be coupled to that particular display.
 
+Development begins with a portable C++20 core and a native Win32 display simulator.
+This permits configuration, state, timing, appearance, layout, framebuffer, and
+output-driver behavior to be developed without ESP32 tools or hardware. See
+[Host-First Development](docs/host-development.md) for build and run instructions.
+
 ---
 
 # 1. Design Goals
