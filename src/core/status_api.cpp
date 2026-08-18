@@ -1,4 +1,5 @@
 #include "pixelstatus/status_api.hpp"
+#include "pixelstatus/validation.hpp"
 
 #include <nlohmann/json.hpp>
 
@@ -74,20 +75,6 @@ ApiResponse json_response(int status, Json body) {
 
 ApiResponse error_response(int status, std::string message) {
     return json_response(status, Json{{"error", std::move(message)}});
-}
-
-bool valid_identifier(std::string_view value, std::size_t maximum_length) {
-    if (value.empty() || value.size() > maximum_length) {
-        return false;
-    }
-    return std::all_of(value.begin(), value.end(), [](unsigned char character) {
-        const auto is_ascii_alphanumeric =
-            (character >= 'A' && character <= 'Z')
-            || (character >= 'a' && character <= 'z')
-            || (character >= '0' && character <= '9');
-        return is_ascii_alphanumeric || character == '-' || character == '_'
-            || character == '.';
-    });
 }
 
 Json state_value_json(const StateValue& value) {
@@ -201,7 +188,7 @@ ApiResponse StatusApi::handle(const ApiRequest& request, TimePoint now) {
 
     if (method == "get") {
         if (route_is_item) {
-            if (!valid_identifier(*id_from_path, limits_.maximum_id_bytes)) {
+            if (!is_valid_identifier(*id_from_path, limits_.maximum_id_bytes)) {
                 return error_response(400, "invalid status id");
             }
             const auto state = states_.resolve(*id_from_path, now);
@@ -258,7 +245,7 @@ ApiResponse StatusApi::handle(const ApiRequest& request, TimePoint now) {
         }
         id = body_id->get<std::string>();
     }
-    if (!valid_identifier(id, limits_.maximum_id_bytes)) {
+    if (!is_valid_identifier(id, limits_.maximum_id_bytes)) {
         return error_response(400, "invalid status id");
     }
 
@@ -267,7 +254,7 @@ ApiResponse StatusApi::handle(const ApiRequest& request, TimePoint now) {
         return error_response(400, "status is required");
     }
     const auto status = status_field->get<std::string>();
-    if (!valid_identifier(status, limits_.maximum_status_bytes)) {
+    if (!is_valid_identifier(status, limits_.maximum_status_bytes)) {
         return error_response(400, "invalid status name");
     }
 

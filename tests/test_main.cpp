@@ -2,16 +2,23 @@
 #include "pixelstatus/config.hpp"
 #include "pixelstatus/frame.hpp"
 #include "pixelstatus/mi_protocol.hpp"
+#include "pixelstatus/monitor_engine.hpp"
 #include "pixelstatus/renderer.hpp"
 #include "pixelstatus/state.hpp"
 #include "pixelstatus/status_api.hpp"
 
 #include <array>
 #include <chrono>
+#include <deque>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <limits>
+#include <memory>
+#include <stdexcept>
 #include <string>
+#include <utility>
+#include <vector>
 
 namespace {
 
@@ -302,6 +309,281 @@ void test_status_api() {
         origin).status == 507);
 }
 
+pixelstatus::EvaluationOutcome evaluate_condition(
+    pixelstatus::EvaluationCondition condition,
+    pixelstatus::StateValue actual) {
+    pixelstatus::EvaluationPolicy policy;
+    policy.rules.push_back({std::move(condition), "matched"});
+    pixelstatus::MonitorResult result;
+    result.transport_success = true;
+    result.value = std::move(actual);
+    return pixelstatus::Evaluator{}.evaluate(result, policy);
+}
+
+void test_evaluator_comparisons() {
+    using pixelstatus::ComparisonOperation;
+    using pixelstatus::EvaluationCondition;
+    using pixelstatus::StateValue;
+
+    CHECK(evaluate_condition(
+        {ComparisonOperation::exists, {}, std::nullopt},
+        StateValue{true}).status == "matched");
+    CHECK(evaluate_condition(
+        {ComparisonOperation::not_exists, {}, std::nullopt},
+        StateValue{}).status == "matched");
+    CHECK(evaluate_condition(
+        {ComparisonOperation::equals, StateValue{42.0}, std::nullopt},
+        StateValue{std::int64_t{42}}).status == "matched");
+    CHECK(evaluate_condition(
+        {ComparisonOperation::not_equals, StateValue{"down"}, std::nullopt},
+        StateValue{"up"}).status == "matched");
+    CHECK(evaluate_condition(
+        {ComparisonOperation::contains, StateValue{"healthy"}, std::nullopt},
+        StateValue{"database healthy"}).status == "matched");
+    CHECK(evaluate_condition(
+        {ComparisonOperation::not_contains, StateValue{"error"}, std::nullopt},
+        StateValue{"healthy"}).status == "matched");
+    CHECK(evaluate_condition(
+        {ComparisonOperation::greater_than, StateValue{std::int64_t{9}}, std::nullopt},
+        StateValue{10.0}).status == "matched");
+    CHECK(evaluate_condition(
+        {ComparisonOperation::greater_or_equal, StateValue{10.0}, std::nullopt},
+        StateValue{std::int64_t{10}}).status == "matched");
+    CHECK(evaluate_condition(
+        {ComparisonOperation::less_than, StateValue{10.0}, std::nullopt},
+        StateValue{std::int64_t{9}}).status == "matched");
+    CHECK(evaluate_condition(
+        {ComparisonOperation::less_or_equal, StateValue{std::int64_t{10}}, std::nullopt},
+        StateValue{10.0}).status == "matched");
+    CHECK(evaluate_condition(
+        {
+            ComparisonOperation::between,
+            StateValue{std::int64_t{10}},
+            StateValue{20.0},
+        },
+        StateValue{std::int64_t{20}}).status == "matched");
+
+    pixelstatus::EvaluationPolicy thresholds;
+    thresholds.rules = {
+        {EvaluationCondition{
+             ComparisonOperation::greater_or_equal,
+             StateValue{95.0},
+             std::nullopt},
+         "critical"},
+        {EvaluationCondition{
+             ComparisonOperation::greater_or_equal,
+             StateValue{85.0},
+             std::nullopt},
+         "warn"},
+        {std::nullopt, "ok"},
+    };
+    const pixelstatus::Evaluator evaluator;
+    CHECK(!evaluator.validate(thresholds));
+
+    pixelstatus::MonitorResult result;
+    result.transport_success = true;
+    result.value = std::int64_t{97};
+    auto outcome = evaluator.evaluate(result, thresholds);
+    CHECK(outcome.status == "critical");
+    CHECK(outcome.matched_rule == 0U);
+
+    result.value = 90.0;
+    outcome = evaluator.evaluate(result, thresholds);
+    CHECK(outcome.status == "warn");
+    CHECK(outcome.matched_rule == 1U);
+
+    result.value = std::int64_t{1};
+    outcome = evaluator.evaluate(result, thresholds);
+    CHECK(outcome.status == "ok");
+    CHECK(outcome.matched_rule == 2U);
+
+    result.transport_success = false;
+    result.error = pixelstatus::MonitorError::timeout;
+    outcome = evaluator.evaluate(result, thresholds);
+    CHECK(outcome.status == "communication_failure");
+    CHECK(outcome.transport_failure);
+    CHECK(!outcome.matched_rule);
+
+    auto invalid = thresholds;
+    invalid.rules.insert(invalid.rules.begin(), {std::nullopt, "ok"});
+    CHECK(evaluator.validate(invalid).has_value());
+    invalid = thresholds;
+    invalid.rules.front().when = EvaluationCondition{
+        ComparisonOperation::between,
+        StateValue{20.0},
+        StateValue{10.0},
+    };
+    CHECK(evaluator.validate(invalid).has_value());
+    invalid = thresholds;
+    invalid.rules.front().when = EvaluationCondition{
+        ComparisonOperation::greater_than,
+        StateValue{std::numeric_limits<double>::quiet_NaN()},
+        std::nullopt,
+    };
+    CHECK(evaluator.validate(invalid).has_value());
+}
+
+struct ScriptedRunnerProbe {
+    std::deque<pixelstatus::MonitorResult> results;
+    std::size_t calls{};
+};
+
+class ScriptedMonitorRunner final : public pixelstatus::MonitorRunner {
+public:
+    explicit ScriptedMonitorRunner(std::shared_ptr<ScriptedRunnerProbe> probe)
+        : probe_(std::move(probe)) {}
+
+    pixelstatus::MonitorResult run(pixelstatus::TimePoint) override {
+        ++probe_->calls;
+        if (probe_->results.empty()) {
+            throw std::runtime_error("script exhausted");
+        }
+        auto result = std::move(probe_->results.front());
+        probe_->results.pop_front();
+        return result;
+    }
+
+private:
+    std::shared_ptr<ScriptedRunnerProbe> probe_;
+};
+
+pixelstatus::MonitorResult successful_monitor_result(pixelstatus::StateValue value) {
+    pixelstatus::MonitorResult result;
+    result.transport_success = true;
+    result.value = std::move(value);
+    result.latency = 25ms;
+    return result;
+}
+
+void test_monitor_engine() {
+    const auto origin = pixelstatus::TimePoint{};
+    pixelstatus::StateStore states;
+    pixelstatus::MonitorEngine engine(states);
+
+    pixelstatus::EvaluationPolicy thresholds;
+    thresholds.rules = {
+        {pixelstatus::EvaluationCondition{
+             pixelstatus::ComparisonOperation::greater_or_equal,
+             std::int64_t{95},
+             std::nullopt},
+         "critical"},
+        {pixelstatus::EvaluationCondition{
+             pixelstatus::ComparisonOperation::greater_or_equal,
+             std::int64_t{85},
+             std::nullopt},
+         "warn"},
+        {std::nullopt, "ok"},
+    };
+
+    auto probe = std::make_shared<ScriptedRunnerProbe>();
+    probe->results.push_back(successful_monitor_result(std::int64_t{97}));
+    probe->results.push_back(successful_monitor_result(88.0));
+    pixelstatus::MonitorResult timeout;
+    timeout.transport_success = false;
+    timeout.error = pixelstatus::MonitorError::timeout;
+    timeout.detail = "TCP connection timed out";
+    probe->results.push_back(std::move(timeout));
+
+    pixelstatus::MonitorDefinition definition;
+    definition.id = "temperature";
+    definition.interval = 10s;
+    definition.ttl = 15s;
+    definition.evaluation = thresholds;
+    const auto registered = engine.add(
+        definition,
+        std::make_unique<ScriptedMonitorRunner>(probe),
+        origin);
+    CHECK(registered);
+    CHECK(engine.size() == 1U);
+
+    const auto duplicate = engine.add(
+        definition,
+        std::make_unique<ScriptedMonitorRunner>(std::make_shared<ScriptedRunnerProbe>()),
+        origin);
+    CHECK(!duplicate);
+
+    auto invalid_definition = definition;
+    invalid_definition.id = "invalid";
+    invalid_definition.interval = 0ms;
+    CHECK(!engine.add(
+        invalid_definition,
+        std::make_unique<ScriptedMonitorRunner>(std::make_shared<ScriptedRunnerProbe>()),
+        origin));
+
+    auto report = engine.run_due(origin, 0U);
+    CHECK(report.due == 1U);
+    CHECK(report.executed == 0U);
+    CHECK(!states.find("temperature"));
+
+    report = engine.run_due(origin);
+    CHECK(report.executed == 1U);
+    CHECK(report.state_updates == 1U);
+    CHECK(probe->calls == 1U);
+    CHECK(engine.next_due("temperature") == origin + 10s);
+    auto state = states.resolve("temperature", origin);
+    CHECK(state && state->effective_status == "critical");
+    CHECK(state && std::get<std::int64_t>(state->state.value) == 97);
+
+    pixelstatus::AppConfig render_config;
+    render_config.display = {1, 1, {}};
+    render_config.statuses.emplace("critical", pixelstatus::TimelineAppearance::solid({255, 0, 0}));
+    render_config.statuses.emplace("stale", pixelstatus::TimelineAppearance::solid({255, 128, 0}));
+    render_config.statuses.emplace("unknown", pixelstatus::TimelineAppearance::solid({255, 0, 255}));
+    render_config.indicators.push_back({"temperature-indicator", "temperature", 0, 0, 1, 1});
+    pixelstatus::Frame frame(1, 1);
+    CHECK(pixelstatus::Renderer(origin).render(states, render_config, origin, frame).success);
+    CHECK((*frame.pixel(0, 0) == pixelstatus::Rgb{255, 0, 0}));
+
+    CHECK(engine.run_due(origin + 9s).executed == 0U);
+    report = engine.run_due(origin + 10s);
+    CHECK(report.executed == 1U);
+    state = states.resolve("temperature", origin + 10s);
+    CHECK(state && state->effective_status == "warn");
+
+    report = engine.run_due(origin + 20s);
+    CHECK(report.transport_failures == 1U);
+    CHECK(report.runner_exceptions == 0U);
+    state = states.resolve("temperature", origin + 20s);
+    CHECK(state && state->effective_status == "communication_failure");
+    CHECK(state && state->state.message == "TCP connection timed out");
+
+    report = engine.run_due(origin + 100s);
+    CHECK(report.executed == 1U);
+    CHECK(report.transport_failures == 1U);
+    CHECK(report.runner_exceptions == 1U);
+    CHECK(engine.next_due("temperature") == origin + 110s);
+    state = states.resolve("temperature", origin + 100s);
+    CHECK(state && state->effective_status == "communication_failure");
+    CHECK(state && state->state.message.find("script exhausted") != std::string::npos);
+    state = states.resolve("temperature", origin + 115s);
+    CHECK(state && state->effective_status == "stale");
+
+    pixelstatus::StateStore bounded_states;
+    pixelstatus::MonitorEngine bounded_engine(bounded_states);
+    pixelstatus::EvaluationPolicy always_ok;
+    always_ok.rules.push_back({std::nullopt, "ok"});
+    for (const auto* id : {"b", "a"}) {
+        auto runner_probe = std::make_shared<ScriptedRunnerProbe>();
+        runner_probe->results.push_back(successful_monitor_result(true));
+        pixelstatus::MonitorDefinition monitor;
+        monitor.id = id;
+        monitor.interval = 1s;
+        monitor.evaluation = always_ok;
+        CHECK(bounded_engine.add(
+            std::move(monitor),
+            std::make_unique<ScriptedMonitorRunner>(std::move(runner_probe)),
+            origin));
+    }
+    report = bounded_engine.run_due(origin, 1U);
+    CHECK(report.due == 2U);
+    CHECK(report.executed == 1U);
+    CHECK(bounded_states.find("a").has_value());
+    CHECK(!bounded_states.find("b"));
+    report = bounded_engine.run_due(origin, 1U);
+    CHECK(report.due == 1U);
+    CHECK(bounded_states.find("b").has_value());
+}
+
 void test_configuration_rejects_invalid_identifiers() {
     const auto path = std::filesystem::temp_directory_path()
         / "pixelstatus-nx-invalid-identifier-test.json";
@@ -366,6 +648,8 @@ int main() {
     test_configuration_rejects_unknown_fields();
     test_configuration_rejects_invalid_identifiers();
     test_status_api();
+    test_evaluator_comparisons();
+    test_monitor_engine();
 
     if (failures != 0) {
         std::cerr << failures << " test check(s) failed\n";

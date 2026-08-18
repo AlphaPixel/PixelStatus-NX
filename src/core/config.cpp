@@ -1,8 +1,8 @@
 #include "pixelstatus/config.hpp"
+#include "pixelstatus/validation.hpp"
 
 #include <nlohmann/json.hpp>
 
-#include <algorithm>
 #include <charconv>
 #include <cstdint>
 #include <fstream>
@@ -20,7 +20,6 @@ constexpr std::size_t maximum_dimension = 256U;
 constexpr std::size_t maximum_pixels = 65'536U;
 constexpr std::size_t maximum_indicators = 1'024U;
 constexpr std::size_t maximum_statuses = 256U;
-constexpr std::size_t maximum_identifier_bytes = 64U;
 constexpr Duration maximum_appearance_duration = std::chrono::hours(24);
 
 void add_error(ConfigLoadResult& result, std::string message) {
@@ -64,25 +63,13 @@ void reject_unknown_fields(
     return value;
 }
 
-[[nodiscard]] bool valid_identifier(std::string_view value) {
-    return !value.empty() && value.size() <= maximum_identifier_bytes
-        && std::all_of(value.begin(), value.end(), [](unsigned char character) {
-            const auto is_ascii_alphanumeric =
-                (character >= 'A' && character <= 'Z')
-                || (character >= 'a' && character <= 'z')
-                || (character >= '0' && character <= '9');
-            return is_ascii_alphanumeric || character == '-'
-                || character == '_' || character == '.';
-        });
-}
-
 [[nodiscard]] std::optional<std::string> required_identifier(
     const Json& object,
     std::string_view key,
     std::string_view path,
     ConfigLoadResult& result) {
     auto value = required_string(object, key, path, result);
-    if (value && !valid_identifier(*value)) {
+    if (value && !is_valid_identifier(*value)) {
         add_error(
             result,
             std::string(path) + "." + std::string(key)
@@ -597,7 +584,7 @@ ConfigLoadResult load_config_file(const std::filesystem::path& path) {
         } else {
             for (auto status = statuses->begin(); status != statuses->end(); ++status) {
                 const auto path_text = std::string("statuses.") + status.key();
-                if (!valid_identifier(status.key())) {
+                if (!is_valid_identifier(status.key())) {
                     add_error(
                         result,
                         path_text

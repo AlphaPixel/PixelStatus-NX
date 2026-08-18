@@ -104,6 +104,14 @@ The default portable limits allow 256 states, 64-byte IDs and status names, a
 512-byte message, a 1 KiB string value, and a maximum TTL of seven days.
 See [Configuration V1](configuration-v1.md) for the status and appearance model.
 
+## Portable Pull-Monitor Foundation
+
+The core library now also contains host-tested runner, evaluator, and deterministic
+interval-engine contracts. Scripted runners exercise the complete path from a due
+monitor through threshold evaluation, state publication, TTL, and rendering without
+performing network I/O. See [Host Monitor Engine](monitor-engine.md) for comparison
+semantics, scheduling behavior, and the concrete runners still to be added.
+
 The simulator supports:
 
 - four rectangular indicators on a 16x16 logical display;
@@ -133,4 +141,6 @@ scheduling.
 
 The host build does not include ESP-IDF, a cross-compiler, NimBLE transport, Wi-Fi,
 NVS, LittleFS, GPIO, or OTA support. MI packet construction is host-tested, but actual
-BLE behavior remains a hardware validation task.
+BLE behavior remains a hardware validation task. Concrete pull transports and their
+JSON configuration are also deferred; their portable execution contracts are now in
+place and tested.

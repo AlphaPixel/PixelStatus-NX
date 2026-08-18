@@ -26,10 +26,14 @@ add_library(pixelstatus_core
     src/core/color.cpp
     src/core/config.cpp
     src/core/frame.cpp
+    src/core/evaluator.cpp
     src/core/mi_protocol.cpp
+    src/core/monitor.cpp
+    src/core/monitor_engine.cpp
     src/core/renderer.cpp
     src/core/state.cpp
     src/core/status_api.cpp
+    src/core/validation.cpp
 )
 
 target_include_directories(pixelstatus_core PUBLIC include)
@@ -54,9 +58,9 @@ if(PIXELSTATUS_BUILD_SIMULATOR)
     set(HTTPLIB_USE_ZSTD_IF_AVAILABLE OFF CACHE INTERNAL "")
     FetchContent_Declare(
         cpp_httplib
-        GIT_REPOSITORY https://github.com/yhirose/cpp-httplib.git
-        GIT_TAG v0.51.0
-        GIT_SHALLOW TRUE
+        URL https://github.com/yhirose/cpp-httplib/archive/refs/tags/v0.51.0.tar.gz
+        URL_HASH SHA256=d740ced75352f44e9d66d08806dc231b5621bb3592b5a5d5b2bd890a9a9d86cc
+        DOWNLOAD_EXTRACT_TIMESTAMP TRUE
     )
     FetchContent_MakeAvailable(cpp_httplib)
 

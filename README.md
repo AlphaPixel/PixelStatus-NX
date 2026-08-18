@@ -22,6 +22,9 @@ The current host implementation also accepts authenticated status pushes over a
 loopback HTTP endpoint; its transport-independent handler is intended to be reused
 behind the eventual ESP32 HTTP server. The supported JSON appearance syntax is
 documented in [Configuration V1](docs/configuration-v1.md).
+The next host-only layer—normalized monitor results, ordered evaluation rules, and
+deterministic interval scheduling—is described in
+[Host Monitor Engine](docs/monitor-engine.md).
 
 ---
 
@@ -2129,3 +2132,8 @@ same path through the MI output remains part of Gate 3 hardware validation.
 Add scheduling and pull monitors incrementally, followed by MQTT, direct LEDs,
 persistence hardening, management UI, and OTA. Each monitor and output backend should
 enter through the established state, rendering, and driver contracts.
+
+Status: the portable interval scheduler, runner boundary, normalized result, and
+generic evaluator are host-tested with scripted runners. Concrete network runners,
+monitor configuration syntax, jitter/cron support, and the bounded worker executor
+remain incremental follow-on work.
