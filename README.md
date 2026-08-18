@@ -153,9 +153,13 @@ The current development display is:
 - RGB;
 - 256 total pixels;
 - externally controlled;
-- connected over Bluetooth, believed to be Bluetooth LE.
+- connected over Bluetooth Low Energy using GATT writes.
 
-The exact Bluetooth protocol needs to be identified and implemented as an output driver.
+The working single-pixel protocol and candidate full-frame protocol are documented in
+[MI LED Display Python Development Handoff](mi-led-display-python-handoff.md). The
+single-pixel path has been exercised on the user's display. Full-frame block mode,
+physical orientation, throughput, and several connection details still require
+device validation.
 
 The current device is an important target, but **must not define the core architecture**.
 
@@ -196,6 +200,11 @@ Responsibilities include:
 - brightness if supported;
 - connection-state reporting.
 
+The production firmware implementation should be a native ESP-IDF C/C++ component
+using the NimBLE central/GATT-client APIs. The desktop Python/`bleak` implementation
+is a protocol reference, diagnostic tool, and test oracle; it is not a runtime
+dependency of the ESP32 firmware.
+
 ### Direct Addressable LED Driver
 
 Support directly attached hardware such as:
@@ -224,13 +233,26 @@ Additional output drivers should be possible without altering monitor or rendere
 Example interface:
 
 ```cpp
+enum class FrameSubmitResult {
+    accepted,
+    coalesced,
+    unavailable,
+};
+
 class OutputDriver {
 public:
     virtual bool begin() = 0;
-    virtual void submitFrame(const Frame& frame) = 0;
+    virtual FrameSubmitResult submitFrame(const Frame& frame) = 0;
     virtual DriverState state() const = 0;
 };
 ```
+
+Frame submission should not require the renderer to wait for physical transport.
+A slow driver may retain or copy the newest frame, replace an older pending frame,
+and report that coalescing occurred. Acceptance means that the driver took
+responsibility for the frame; it does not guarantee that the physical display has
+already received it. Transport errors and reconnect progress are exposed through
+`DriverState`.
 
 Output capabilities may differ, so drivers may eventually expose capabilities such as:
 
@@ -1536,26 +1558,55 @@ The API and internal state model should use the same status names.
 
 ---
 
-# 34. Bluetooth Display Driver
+# 34. MI Bluetooth Display Driver
 
-The current Bluetooth display protocol needs to be reverse-engineered or documented.
+The current display is controlled as a BLE peripheral through GATT writes. Protocol
+knowledge has different evidence levels and should not be treated uniformly.
 
-Investigation should determine:
+## Validated on the User's Display
 
-- BLE or classic Bluetooth;
-- service UUIDs;
-- characteristic UUIDs;
-- command framing;
-- pixel ordering;
-- color ordering;
-- maximum packet size;
-- frame-transfer protocol;
-- brightness commands;
-- acknowledgement behavior;
-- reconnect behavior;
-- maximum practical frame rate.
+- the upstream `draw_pixels.py` path controls the display;
+- graffiti-mode initialization uses `BC 00 01 01 55` followed by
+  `BC 00 0D 0D 55`;
+- the working single-pixel packet rule uses the trailing-byte behavior documented
+  in the Python handoff rather than the conflicting upstream protocol note;
+- rewriting all 256 pixels through individual writes takes roughly five seconds on
+  the current Windows host.
 
-The renderer should remain unaware of these details.
+## Derived From the Upstream Implementation
+
+- advertised name: `MI Matrix Display`;
+- service UUID: `0000ffd0-0000-1000-8000-00805f9b34fb`;
+- write characteristic UUID: `0000ffd1-0000-1000-8000-00805f9b34fb`;
+- block-mode initialization: `BC 0F F1 08 08 55`;
+- eight 100-byte block packets are expected to transfer a complete frame.
+
+These upstream-derived details are suitable starting points but should be recorded
+as device-validated only after the corresponding calibration and block tests pass.
+
+## Still To Validate
+
+- physical pixel ordering, origin, rotation, mirroring, and serpentine behavior;
+- RGB color ordering;
+- negotiated ATT MTU and reliable maximum write size;
+- write-with-response versus write-without-response behavior;
+- stable block delay and maximum practical frame rate;
+- whether graffiti and block modes can be switched or interleaved safely;
+- brightness commands, if supported;
+- disconnect, reconnect, and current-frame restoration behavior.
+
+The firmware driver should contain three focused parts:
+
+```text
+MiBleOutputDriver
+├── frame diffing, coalescing, mode choice, and driver state
+├── MI packet encoder with pure byte-building functions
+└── ESP-IDF NimBLE GATT transport
+```
+
+Sparse/full-frame selection belongs inside this driver. Automatic mode selection
+must not be enabled until mode-switching behavior and the crossover threshold have
+been measured. The renderer remains unaware of all MI-specific details.
 
 ---
 
@@ -1735,6 +1786,9 @@ Previously persisted states could optionally be displayed immediately but should
 
 # 42. Suggested V1 Scope
 
+This section describes the intended V1 release envelope, not the first implementation
+increment. V1 should be built through independently testable vertical slices.
+
 ## Platform
 
 - ESP32-S3
@@ -1804,6 +1858,34 @@ Previously persisted states could optionally be displayed immediately but should
 
 - OTA firmware updates.
 
+## Initial Implementation Milestone
+
+The first implementation milestone should establish one complete path:
+
+```text
+versioned JSON configuration
+        ↓
+in-memory state update
+        ↓
+state store
+        ↓
+solid and blink appearances
+        ↓
+rectangular indicator layout
+        ↓
+logical framebuffer
+        ↓
+simulator output
+```
+
+This milestone should also define the shared value type, timestamp and TTL semantics,
+configuration validation behavior, output-driver ownership/backpressure contract,
+and byte-level MI protocol test vectors. It does not require network monitors or
+physical display access.
+
+After the simulator path is verified, add the native MI BLE driver as the second
+output while keeping the same framebuffer and renderer contracts.
+
 ---
 
 # 43. Explicitly Out of Scope for V1
@@ -1811,7 +1893,7 @@ Previously persisted states could optionally be displayed immediately but should
 Do not initially implement:
 
 - arbitrary shell commands;
-- Python;
+- Python execution in production firmware;
 - Lua;
 - JavaScript execution;
 - SSH command execution;
@@ -1923,7 +2005,8 @@ public:
 class OutputDriver {
 public:
     virtual bool begin() = 0;
-    virtual void submitFrame(const Frame&) = 0;
+    virtual FrameSubmitResult submitFrame(const Frame&) = 0;
+    virtual DriverState state() const = 0;
 };
 ```
 
@@ -1981,3 +2064,52 @@ output driver
 ```
 
 This separation is what allows PixelStatus NX to evolve beyond both its current Bluetooth 16×16 display and the much more constrained architecture of the original PixelStatus.
+
+---
+
+# 47. Initial Implementation Approval Plan
+
+Implementation should proceed through the following approval gates.
+
+## Gate 1: Contracts and Repository Skeleton
+
+- create the ESP-IDF project and component directories;
+- select and pin the initial ESP-IDF toolchain version;
+- define the frame, value, monitor-state, status, time, and output-driver types;
+- define versioned minimal JSON schemas and validation rules;
+- add host-runnable tests for pure core logic and MI packet vectors.
+
+Deliverable: a building skeleton with tests, but no networking or hardware access.
+
+## Gate 2: Simulator Vertical Slice
+
+- implement state transitions and TTL/stale behavior;
+- compile solid and blink appearances to the timeline representation;
+- render rectangular indicators into a logical framebuffer;
+- display or export frames through a simulator driver.
+
+Deliverable: configuration-to-pixels behavior that can be tested without hardware.
+
+## Gate 3: MI Hardware Validation and Native Driver
+
+- run the Python calibration, block, MTU, response-mode, delay, and reconnect tests;
+- record results in the MI handoff;
+- implement the native NimBLE transport and MI packet encoder;
+- add frame coalescing and conservative reconnect behavior;
+- enable sparse/full-frame selection only if the measurements justify it.
+
+Deliverable: the same simulator-rendered frames displayed on the MI matrix.
+
+## Gate 4: First External State Input
+
+- add the authenticated local HTTP status endpoint;
+- apply TTL and validation limits;
+- confirm that pushed states update both simulator and MI outputs identically.
+
+Deliverable: an end-to-end ambient status appliance with one push interface.
+
+## Later V1 Gates
+
+Add scheduling and pull monitors incrementally, followed by MQTT, direct LEDs,
+persistence hardening, management UI, and OTA. Each monitor and output backend should
+enter through the established state, rendering, and driver contracts.

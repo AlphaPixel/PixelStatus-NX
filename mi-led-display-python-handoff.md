@@ -6,6 +6,20 @@ Project context: Python control of a Merkury / MI 16x16 Bluetooth LED matrix dis
 
 Repository: https://github.com/offe/mi-led-display
 
+## Document role and evidence labels
+
+This document is the hardware workbench and protocol evidence record for the MI
+display. The Python code is intended for discovery, calibration, benchmarking, and
+generation of protocol test vectors. PixelStatus NX production firmware will not run
+Python or `bleak`; it will use a native ESP-IDF NimBLE output driver.
+
+Protocol claims use these evidence levels:
+
+- **device-validated**: observed on the user's physical display;
+- **upstream-derived**: taken from `offe/mi-led-display` but not yet independently
+  confirmed on the user's device;
+- **working assumption**: plausible behavior that requires a calibration test.
+
 ## 1. Hardware and host assumptions
 
 ### Display
@@ -175,7 +189,8 @@ def make_block_command(block_index: int, r: int, g: int, b: int) -> bytes:
     return bytes(out)
 ```
 
-Full-frame block mode is the preferred path for any frame where many pixels change.
+If it validates successfully on the user's device, full-frame block mode is expected
+to be the preferred path for any frame where many pixels change.
 
 ## 4. Performance findings and expectations
 
@@ -258,7 +273,11 @@ But BLE write count matters more than bytes, so block mode may win earlier than 
 
 There is no known hardware sprite mode, dirty rectangle mode, palette mode, framebuffer streaming API, or command batching API beyond the 8-block full-frame mode.
 
-## 6. Known-good code: full-screen flash test
+## 6. Candidate full-screen block-mode test
+
+The packet structure in this test is **upstream-derived**. The script is ready to use
+for validation, but block-mode behavior is not device-validated until the experiments
+in section 9 have been run without corruption.
 
 Save as `flash_fullscreen.py`.
 
@@ -421,9 +440,11 @@ Interpretation:
 - visible black/white flash rate = half the full frame rate
 - `10 full frames/sec` means 5 white flashes/sec
 
-## 7. Known-good code: single-pixel Pong concept
+## 7. Single-pixel example using the device-validated packet rule
 
 This uses sparse graffiti-mode updates: clear the old pixel and draw the new pixel.
+The underlying `draw_pixels.py` packet rule is device-validated. The Pong animation
+and its motion behavior remain example code rather than a protocol validation result.
 
 Key ideas:
 
@@ -550,7 +571,10 @@ def bounce_with_incidence_jitter(
 
 ## 8. Development recommendations for an LLM coding agent
 
-### 8.1 First task: create a reusable driver module
+### 8.1 Create a host-side reference driver module
+
+This package should remain a desktop diagnostic and test-oracle tool. It is not the
+production ESP32 output driver.
 
 Create a Python module, for example:
 
@@ -711,6 +735,29 @@ Validated facts from the user conversation:
 - Full single-pixel rewrite via `draw_pixels.py` takes about 5 seconds on the user's setup.
 - User wants Python access and wants to develop interactive/display-control experiments.
 
+### 8.7 ESP32 production integration decision
+
+The ESP32-S3 firmware should use ESP-IDF, FreeRTOS, and the native NimBLE
+central/GATT-client APIs. The desktop `bleak` transport cannot be reused directly.
+Reuse the protocol knowledge through shared byte-level test vectors instead.
+
+Recommended native component split:
+
+```text
+output/mi_ble/
+├── mi_protocol        pure packet construction and coordinate mapping
+├── mi_ble_transport   scan, connect, discover, write, and reconnect
+└── mi_output_driver   framebuffer diff, coalescing, mode choice, and state
+```
+
+The driver should queue or copy the latest submitted frame and must not block the
+renderer while BLE transfer is in progress. If frames arrive faster than the device
+can accept them, replace older pending frames with the newest complete frame.
+
+A MicroPython proof of concept is technically possible because MicroPython exposes
+BLE central and GATT-client operations. It is not the selected production path and
+would still require a new transport implementation rather than running `bleak`.
+
 ## 9. Next experiments
 
 1. Run `flash_fullscreen.py` with:
@@ -725,6 +772,7 @@ Record:
 - printed full frames/sec
 - visual corruption yes/no
 - whether brightness visibly toggles cleanly
+- negotiated MTU or maximum accepted characteristic-write size, if observable
 
 2. If corrupt, test:
 
@@ -740,11 +788,23 @@ USE_RESPONSE = False
 BLOCK_DELAY = 0.001
 ```
 
-4. Create a small driver package and convert examples to use it.
+4. Run coordinate-corner, index-walk, and per-block color calibration. Record origin,
+   rotation, mirroring, pixel order, and color order.
 
-5. Implement framebuffer diffing and mode selection.
+5. Test transitions between graffiti and block modes. Determine whether each change
+   requires reinitialization and whether mode switching preserves untouched pixels.
 
-6. Implement a status-display grammar for PixelStatus NX-style patterns:
+6. Disconnect and reconnect during a frame update. Verify that a complete current
+   frame can be restored after reconnection.
+
+7. Create a small host reference package and convert examples to use it.
+
+8. Generate fixed packet test vectors for the native ESP-IDF implementation.
+
+9. Implement framebuffer diffing. Enable automatic sparse/block selection only after
+   the mode-switching and throughput results establish a safe crossover threshold.
+
+10. Implement a status-display grammar for PixelStatus NX-style patterns:
 
 ```text
 solid(color)
@@ -778,4 +838,3 @@ Output drivers should be modular:
 The BLE MI display should be treated as one low-resolution, low-throughput output backend.
 
 For richer animation, ESP32 direct LED driving will likely outperform BLE-to-MI-display control. For simple statuses and sparse changes, the MI display is adequate.
-
