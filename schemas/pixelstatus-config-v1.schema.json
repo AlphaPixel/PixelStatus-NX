@@ -21,6 +21,9 @@
       "type": "object",
       "minProperties": 2,
       "maxProperties": 256,
+      "propertyNames": {
+        "$ref": "#/$defs/identifier"
+      },
       "required": [
         "unknown",
         "stale"
@@ -43,9 +46,44 @@
       "type": "string",
       "pattern": "^#[0-9A-Fa-f]{6}$"
     },
+    "identifier": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[A-Za-z0-9_.-]+$"
+    },
     "positiveDuration": {
       "type": "string",
       "pattern": "^[1-9][0-9]*(ms|s|m|h)$"
+    },
+    "percentage": {
+      "oneOf": [
+        {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100
+        },
+        {
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]?|100)%$"
+        }
+      ]
+    },
+    "appearanceStep": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "color",
+        "duration"
+      ],
+      "properties": {
+        "color": {
+          "$ref": "#/$defs/color"
+        },
+        "duration": {
+          "$ref": "#/$defs/positiveDuration"
+        }
+      }
     },
     "display": {
       "type": "object",
@@ -119,6 +157,160 @@
                   }
                 }
               }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "toggle"
+              ],
+              "properties": {
+                "toggle": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "colors",
+                    "period"
+                  ],
+                  "properties": {
+                    "colors": {
+                      "type": "array",
+                      "minItems": 2,
+                      "maxItems": 16,
+                      "items": {
+                        "$ref": "#/$defs/color"
+                      }
+                    },
+                    "period": {
+                      "$ref": "#/$defs/positiveDuration"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "fade"
+              ],
+              "properties": {
+                "fade": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "from",
+                    "to",
+                    "period"
+                  ],
+                  "properties": {
+                    "from": {
+                      "$ref": "#/$defs/color"
+                    },
+                    "to": {
+                      "$ref": "#/$defs/color"
+                    },
+                    "period": {
+                      "$ref": "#/$defs/positiveDuration"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "pulse"
+              ],
+              "properties": {
+                "pulse": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "color",
+                    "period"
+                  ],
+                  "properties": {
+                    "color": {
+                      "$ref": "#/$defs/color"
+                    },
+                    "period": {
+                      "$ref": "#/$defs/positiveDuration"
+                    },
+                    "minimum": {
+                      "$ref": "#/$defs/percentage"
+                    },
+                    "maximum": {
+                      "$ref": "#/$defs/percentage"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "sequence"
+              ],
+              "properties": {
+                "sequence": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "steps"
+                  ],
+                  "properties": {
+                    "repeat": {
+                      "type": "boolean",
+                      "default": true
+                    },
+                    "steps": {
+                      "type": "array",
+                      "minItems": 1,
+                      "maxItems": 64,
+                      "items": {
+                        "$ref": "#/$defs/appearanceStep"
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "cycle"
+              ],
+              "properties": {
+                "cycle": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "steps"
+                  ],
+                  "properties": {
+                    "transition": {
+                      "type": "string",
+                      "enum": [
+                        "step",
+                        "linear"
+                      ],
+                      "default": "linear"
+                    },
+                    "steps": {
+                      "type": "array",
+                      "minItems": 2,
+                      "maxItems": 64,
+                      "items": {
+                        "$ref": "#/$defs/appearanceStep"
+                      }
+                    }
+                  }
+                }
+              }
             }
           ]
         }
@@ -137,12 +329,10 @@
       ],
       "properties": {
         "id": {
-          "type": "string",
-          "minLength": 1
+          "$ref": "#/$defs/identifier"
         },
         "source": {
-          "type": "string",
-          "minLength": 1
+          "$ref": "#/$defs/identifier"
         },
         "x": {
           "type": "integer",

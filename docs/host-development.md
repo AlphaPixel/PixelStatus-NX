@@ -23,8 +23,14 @@ The equivalent one-command workflow is:
 .\tools\build-host.ps1
 ```
 
-CMake downloads the pinned `nlohmann/json` 3.12.0 release into the ignored build
-tree. No dependency is installed globally.
+After building, run the repeatable simulator/API integration smoke test with:
+
+```powershell
+.\tools\test-host-api.ps1
+```
+
+CMake downloads the pinned `nlohmann/json` 3.12.0 and `cpp-httplib` 0.51.0
+releases into the ignored build tree. No dependency is installed globally.
 
 The canonical configuration contract is
 [`schemas/pixelstatus-config-v1.schema.json`](../schemas/pixelstatus-config-v1.schema.json).
@@ -50,12 +56,61 @@ For an automated graphical smoke test, close the simulator after a fixed interva
 .\out\build\windows-debug\Debug\pixelstatus_simulator.exe --run-for-ms 2000
 ```
 
-The simulator demonstrates:
+The simulator also accepts:
+
+```text
+--api-port N        listen on a different loopback port (default: 8787)
+--api-token TOKEN   use a stable development bearer token
+--no-api            disable the HTTP status input
+```
+
+## Push Statuses From the Host
+
+The simulator exposes the production-shaped status API only on `127.0.0.1`. If no
+token is supplied, it generates and prints a new 64-hex-character token at startup.
+For repeatable local testing, start it with an explicit token:
+
+```powershell
+.\out\build\windows-debug\Debug\pixelstatus_simulator.exe --api-token local-development-token
+```
+
+In a second PowerShell prompt, push and then query a state:
+
+```powershell
+$headers = @{ Authorization = 'Bearer local-development-token' }
+$body = @{
+    status = 'fail'
+    value = 7
+    message = 'Desktop end-to-end test'
+    ttl = 30
+} | ConvertTo-Json
+
+Invoke-RestMethod `
+    -Uri 'http://127.0.0.1:8787/api/v1/status/build' `
+    -Method Post `
+    -Headers $headers `
+    -ContentType 'application/json' `
+    -Body $body
+
+Invoke-RestMethod `
+    -Uri 'http://127.0.0.1:8787/api/v1/status/build' `
+    -Headers $headers
+```
+
+`POST /api/v1/status` also works when the JSON body contains `id`. `ttl` is an
+optional positive integer in seconds. The body is limited to 4 KiB and scalar
+values are limited to null, Boolean, integer, finite floating point, or string.
+The default portable limits allow 256 states, 64-byte IDs and status names, a
+512-byte message, a 1 KiB string value, and a maximum TTL of seven days.
+See [Configuration V1](configuration-v1.md) for the status and appearance model.
+
+The simulator supports:
 
 - four rectangular indicators on a 16x16 logical display;
-- solid and blinking appearances;
+- solid, blink, toggle, fade, pulse, sequence, and color-cycle appearances;
 - a periodic status transition;
 - TTL expiration into the distinct `stale` status;
+- authenticated status pushes over a loopback HTTP endpoint;
 - frame submission through the production `OutputDriver` interface.
 
 ## Driver Equivalence
@@ -64,6 +119,11 @@ The renderer knows only the `OutputDriver` contract. The Win32 simulator copies 
 coalesces submitted logical frames in the same way that a slow BLE driver may need
 to do. A future SDL, browser-proxy, direct-LED, or MI BLE implementation can replace
 the current driver without changing state, appearance, layout, or renderer code.
+
+The HTTP transport is similarly thin: it translates native HTTP requests into the
+portable `StatusApi` request/response contract. The validation and state-update
+logic can therefore be reused by an ESP32 HTTP server without bringing the desktop
+HTTP library into firmware.
 
 Platform-specific event pumping is owned by the host executable and is not part of
 the output contract. On ESP32, FreeRTOS tasks will provide the corresponding runtime

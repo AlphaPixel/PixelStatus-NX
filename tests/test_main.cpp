@@ -4,6 +4,7 @@
 #include "pixelstatus/mi_protocol.hpp"
 #include "pixelstatus/renderer.hpp"
 #include "pixelstatus/state.hpp"
+#include "pixelstatus/status_api.hpp"
 
 #include <array>
 #include <chrono>
@@ -65,6 +66,16 @@ void test_appearance_sampling() {
         1000ms,
         false);
     CHECK((fade.sample(500ms) == pixelstatus::Rgb{50, 100, 25}));
+
+    const pixelstatus::TimelineAppearance repeating_fade(
+        {
+            {0ms, {0, 0, 0}, pixelstatus::Transition::linear},
+            {1000ms, {100, 200, 50}, pixelstatus::Transition::linear},
+        },
+        2000ms,
+        true);
+    CHECK((repeating_fade.sample(1500ms) == pixelstatus::Rgb{50, 100, 25}));
+    CHECK(repeating_fade.sample(2000ms) == pixelstatus::Rgb{});
 }
 
 void test_state_freshness_and_epoch() {
@@ -169,6 +180,151 @@ void test_sample_configuration() {
     CHECK(loaded.config && loaded.config->display.height == 16);
     CHECK(loaded.config && loaded.config->indicators.size() == 4);
     CHECK(loaded.config && loaded.config->statuses.contains("stale"));
+    if (loaded.config) {
+        const auto& statuses = loaded.config->statuses;
+        CHECK((statuses.at("info").sample(0ms) == pixelstatus::Rgb{0x00, 0x50, 0xC8}));
+        CHECK((statuses.at("unknown").sample(500ms) == pixelstatus::Rgb{0x62, 0x00, 0xEA}));
+        CHECK((statuses.at("stale").sample(1000ms) == pixelstatus::Rgb{0xFF, 0x91, 0x00}));
+        CHECK((statuses.at("communication_failure").sample(300ms)
+            == pixelstatus::Rgb{}));
+        CHECK((statuses.at("fade_demo").sample(1000ms)
+            == pixelstatus::Rgb{0x00, 0xA0, 0xFF}));
+    }
+}
+
+pixelstatus::ApiRequest api_request(
+    std::string method,
+    std::string target,
+    std::string body = {}) {
+    pixelstatus::ApiRequest request;
+    request.method = std::move(method);
+    request.target = std::move(target);
+    request.headers.emplace("Authorization", "Bearer test-token");
+    if (!body.empty()) {
+        request.headers.emplace("Content-Type", "application/json; charset=utf-8");
+    }
+    request.body = std::move(body);
+    return request;
+}
+
+void test_status_api() {
+    const auto origin = pixelstatus::TimePoint{};
+    pixelstatus::StateStore states;
+    pixelstatus::StatusApi api(states, "test-token");
+
+    pixelstatus::ApiRequest unauthorized;
+    unauthorized.method = "GET";
+    unauthorized.target = "/api/v1/status";
+    CHECK(api.handle(unauthorized, origin).status == 401);
+
+    auto created = api.handle(
+        api_request(
+            "POST",
+            "/api/v1/status",
+            R"({"id":"build","status":"ok","value":42,"message":"host test","ttl":1})"),
+        origin);
+    CHECK(created.status == 201);
+    CHECK(created.body.find("\"id\":\"build\"") != std::string::npos);
+    CHECK(created.body.find("\"stale\":false") != std::string::npos);
+    CHECK(states.size() == 1U);
+
+    const auto stored = states.find("build");
+    CHECK(stored && stored->status == "ok");
+    CHECK(stored && std::get<std::int64_t>(stored->value) == 42);
+    CHECK(stored && stored->message == "host test");
+    CHECK(stored && stored->ttl == 1s);
+
+    const auto listed = api.handle(api_request("GET", "/api/v1/status"), origin + 500ms);
+    CHECK(listed.status == 200);
+    CHECK(listed.body.find("\"statuses\"") != std::string::npos);
+
+    const auto stale = api.handle(
+        api_request("GET", "/api/v1/status/build"), origin + 1s);
+    CHECK(stale.status == 200);
+    CHECK(stale.body.find("\"status\":\"stale\"") != std::string::npos);
+    CHECK(stale.body.find("\"reported_status\":\"ok\"") != std::string::npos);
+    CHECK(stale.body.find("\"stale\":true") != std::string::npos);
+
+    const auto updated = api.handle(
+        api_request("POST", "/api/v1/status/build", R"({"status":"fail"})"),
+        origin + 2s);
+    CHECK(updated.status == 200);
+    CHECK(updated.body.find("\"status\":\"fail\"") != std::string::npos);
+
+    pixelstatus::AppConfig render_config;
+    render_config.display = {1, 1, {}};
+    render_config.statuses.emplace("fail", pixelstatus::TimelineAppearance::solid({255, 0, 0}));
+    render_config.statuses.emplace("stale", pixelstatus::TimelineAppearance::solid({255, 128, 0}));
+    render_config.statuses.emplace("unknown", pixelstatus::TimelineAppearance::solid({255, 0, 255}));
+    render_config.indicators.push_back({"build-indicator", "build", 0, 0, 1, 1});
+    pixelstatus::Frame rendered_frame(1, 1);
+    const pixelstatus::Renderer renderer(origin);
+    CHECK(renderer.render(states, render_config, origin + 2s, rendered_frame).success);
+    CHECK((*rendered_frame.pixel(0, 0) == pixelstatus::Rgb{255, 0, 0}));
+
+    CHECK(api.handle(
+        api_request(
+            "POST",
+            "/api/v1/status/build",
+            R"({"id":"other","status":"ok"})"),
+        origin).status == 400);
+    CHECK(api.handle(
+        api_request("POST", "/api/v1/status", R"({"id":"new","status":"ok","extra":1})"),
+        origin).status == 400);
+    CHECK(api.handle(
+        api_request("POST", "/api/v1/status", R"({"id":"new","status":"ok","ttl":0})"),
+        origin).status == 400);
+    CHECK(api.handle(
+        api_request("POST", "/api/v1/status", R"({"id":"bad/id","status":"ok"})"),
+        origin).status == 400);
+    CHECK(api.handle(api_request("PUT", "/api/v1/status/build"), origin).status == 405);
+    CHECK(api.handle(api_request("GET", "/api/v1/status/missing"), origin).status == 404);
+
+    auto wrong_content_type = api_request(
+        "POST", "/api/v1/status", R"({"id":"new","status":"ok"})");
+    wrong_content_type.headers["Content-Type"] = "text/plain";
+    CHECK(api.handle(wrong_content_type, origin).status == 415);
+    wrong_content_type.headers["Content-Type"] = "application/jsonbad";
+    CHECK(api.handle(wrong_content_type, origin).status == 415);
+
+    auto oversized = api_request("POST", "/api/v1/status", std::string(4097U, 'x'));
+    CHECK(api.handle(oversized, origin).status == 413);
+
+    pixelstatus::StateStore limited_states;
+    pixelstatus::StatusApiLimits limits;
+    limits.maximum_states = 1U;
+    pixelstatus::StatusApi limited_api(limited_states, "test-token", limits);
+    CHECK(limited_api.handle(
+        api_request("POST", "/api/v1/status/a", R"({"status":"ok"})"),
+        origin).status == 201);
+    CHECK(limited_api.handle(
+        api_request("POST", "/api/v1/status/b", R"({"status":"ok"})"),
+        origin).status == 507);
+}
+
+void test_configuration_rejects_invalid_identifiers() {
+    const auto path = std::filesystem::temp_directory_path()
+        / "pixelstatus-nx-invalid-identifier-test.json";
+    {
+        std::ofstream output(path, std::ios::binary | std::ios::trunc);
+        output << R"({
+          "schema_version": 1,
+          "display": {"width": 1, "height": 1},
+          "statuses": {
+            "unknown": {"appearance": {"solid": "#000000"}},
+            "stale": {"appearance": {"solid": "#FF8000"}}
+          },
+          "indicators": [
+            {"id": "one", "source": "bad/source", "x": 0, "y": 0, "width": 1, "height": 1}
+          ]
+        })";
+    }
+
+    const auto loaded = pixelstatus::load_config_file(path);
+    std::error_code ignored;
+    std::filesystem::remove(path, ignored);
+    CHECK(!loaded);
+    CHECK(!loaded.errors.empty());
 }
 
 void test_configuration_rejects_unknown_fields() {
@@ -208,6 +364,8 @@ int main() {
     test_mi_protocol_vectors();
     test_sample_configuration();
     test_configuration_rejects_unknown_fields();
+    test_configuration_rejects_invalid_identifiers();
+    test_status_api();
 
     if (failures != 0) {
         std::cerr << failures << " test check(s) failed\n";

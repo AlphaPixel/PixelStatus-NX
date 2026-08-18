@@ -53,4 +53,8 @@ Rgb interpolate(Rgb from, Rgb to, double amount) {
     return Rgb{channel(from.r, to.r), channel(from.g, to.g), channel(from.b, to.b)};
 }
 
+Rgb scale_brightness(Rgb color, double amount) {
+    return interpolate(Rgb{}, color, amount);
+}
+
 }  // namespace pixelstatus

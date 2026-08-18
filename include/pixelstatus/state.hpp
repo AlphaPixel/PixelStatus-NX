@@ -3,9 +3,11 @@
 #include <chrono>
 #include <cstdint>
 #include <optional>
+#include <shared_mutex>
 #include <string>
 #include <unordered_map>
 #include <variant>
+#include <vector>
 
 namespace pixelstatus {
 
@@ -37,7 +39,8 @@ public:
     [[nodiscard]] std::optional<ResolvedState> resolve(
         const std::string& id,
         TimePoint now) const;
-    [[nodiscard]] std::size_t size() const noexcept;
+    [[nodiscard]] std::vector<ResolvedState> snapshot(TimePoint now) const;
+    [[nodiscard]] std::size_t size() const;
 
 private:
     struct Entry {
@@ -45,6 +48,7 @@ private:
         TimePoint status_entered_at{};
     };
 
+    mutable std::shared_mutex mutex_;
     std::unordered_map<std::string, Entry> states_;
 };
 

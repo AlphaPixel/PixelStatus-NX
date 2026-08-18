@@ -29,6 +29,7 @@ add_library(pixelstatus_core
     src/core/mi_protocol.cpp
     src/core/renderer.cpp
     src/core/state.cpp
+    src/core/status_api.cpp
 )
 
 target_include_directories(pixelstatus_core PUBLIC include)
@@ -45,12 +46,32 @@ if(PIXELSTATUS_BUILD_SIMULATOR)
         message(FATAL_ERROR "The current simulator uses the Win32 API")
     endif()
 
+    set(HTTPLIB_INSTALL OFF CACHE INTERNAL "")
+    set(HTTPLIB_TEST OFF CACHE INTERNAL "")
+    set(HTTPLIB_USE_OPENSSL_IF_AVAILABLE OFF CACHE INTERNAL "")
+    set(HTTPLIB_USE_ZLIB_IF_AVAILABLE OFF CACHE INTERNAL "")
+    set(HTTPLIB_USE_BROTLI_IF_AVAILABLE OFF CACHE INTERNAL "")
+    set(HTTPLIB_USE_ZSTD_IF_AVAILABLE OFF CACHE INTERNAL "")
+    FetchContent_Declare(
+        cpp_httplib
+        GIT_REPOSITORY https://github.com/yhirose/cpp-httplib.git
+        GIT_TAG v0.51.0
+        GIT_SHALLOW TRUE
+    )
+    FetchContent_MakeAvailable(cpp_httplib)
+
     add_executable(pixelstatus_simulator
+        src/simulator/http_status_server.cpp
         src/simulator/main.cpp
         src/simulator/win32_output_driver.cpp
     )
     target_include_directories(pixelstatus_simulator PRIVATE src/simulator)
-    target_link_libraries(pixelstatus_simulator PRIVATE pixelstatus_core user32 gdi32)
+    target_link_libraries(pixelstatus_simulator PRIVATE
+        pixelstatus_core
+        httplib::httplib
+        user32
+        gdi32
+    )
     target_compile_definitions(pixelstatus_simulator PRIVATE
         NOMINMAX
         WIN32_LEAN_AND_MEAN
@@ -65,6 +86,9 @@ if(PIXELSTATUS_BUILD_SIMULATOR)
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             ${CMAKE_CURRENT_SOURCE_DIR}/examples/pixelstatus.sample.json
             $<TARGET_FILE_DIR:pixelstatus_simulator>/pixelstatus.sample.json
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            ${CMAKE_CURRENT_SOURCE_DIR}/THIRD_PARTY_NOTICES.md
+            $<TARGET_FILE_DIR:pixelstatus_simulator>/THIRD_PARTY_NOTICES.md
         VERBATIM
     )
 endif()

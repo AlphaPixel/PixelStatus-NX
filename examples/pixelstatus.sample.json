@@ -13,7 +13,19 @@
     },
     "info": {
       "appearance": {
-        "solid": "#2979FF"
+        "cycle": {
+          "transition": "linear",
+          "steps": [
+            {
+              "color": "#0050C8",
+              "duration": "1s"
+            },
+            {
+              "color": "#40C4FF",
+              "duration": "1s"
+            }
+          ]
+        }
       }
     },
     "fail": {
@@ -27,16 +39,57 @@
     },
     "stale": {
       "appearance": {
-        "blink": {
+        "pulse": {
           "color": "#FF9100",
-          "on": "250ms",
-          "off": "750ms"
+          "period": "2s",
+          "minimum": "10%",
+          "maximum": "100%"
         }
       }
     },
     "unknown": {
       "appearance": {
-        "solid": "#D500F9"
+        "toggle": {
+          "colors": [
+            "#D500F9",
+            "#6200EA"
+          ],
+          "period": "500ms"
+        }
+      }
+    },
+    "communication_failure": {
+      "appearance": {
+        "sequence": {
+          "repeat": true,
+          "steps": [
+            {
+              "color": "#FF00FF",
+              "duration": "200ms"
+            },
+            {
+              "color": "#000000",
+              "duration": "200ms"
+            },
+            {
+              "color": "#FF00FF",
+              "duration": "200ms"
+            },
+            {
+              "color": "#000000",
+              "duration": "1400ms"
+            }
+          ]
+        }
+      }
+    },
+    "fade_demo": {
+      "appearance": {
+        "fade": {
+          "from": "#001020",
+          "to": "#00A0FF",
+          "period": "2s"
+        }
       }
     }
   },

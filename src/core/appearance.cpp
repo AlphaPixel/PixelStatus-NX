@@ -59,13 +59,18 @@ Rgb TimelineAppearance::sample(Duration elapsed) const {
     }
 
     const auto& current = keyframes_[current_index];
-    if (current_index + 1 >= keyframes_.size()
-        || current.transition_to_next == Transition::step) {
+    if (current.transition_to_next == Transition::step) {
         return current.color;
     }
 
-    const auto& next = keyframes_[current_index + 1];
-    const auto interval = next.at - current.at;
+    const auto wraps = current_index + 1 >= keyframes_.size();
+    if (wraps && (!repeat_ || cycle_ <= current.at)) {
+        return current.color;
+    }
+
+    const auto& next = wraps ? keyframes_.front() : keyframes_[current_index + 1];
+    const auto next_time = wraps ? cycle_ : next.at;
+    const auto interval = next_time - current.at;
     if (interval <= Duration::zero()) {
         return next.color;
     }

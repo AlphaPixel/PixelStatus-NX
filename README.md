@@ -18,6 +18,10 @@ Development begins with a portable C++20 core and a native Win32 display simulat
 This permits configuration, state, timing, appearance, layout, framebuffer, and
 output-driver behavior to be developed without ESP32 tools or hardware. See
 [Host-First Development](docs/host-development.md) for build and run instructions.
+The current host implementation also accepts authenticated status pushes over a
+loopback HTTP endpoint; its transport-independent handler is intended to be reused
+behind the eventual ESP32 HTTP server. The supported JSON appearance syntax is
+documented in [Configuration V1](docs/configuration-v1.md).
 
 ---
 
@@ -2095,6 +2099,9 @@ Deliverable: a building skeleton with tests, but no networking or hardware acces
 
 Deliverable: configuration-to-pixels behavior that can be tested without hardware.
 
+Status: complete on the native Win32 target. The timeline compiler now covers the
+full initial appearance grammar, not only solid and blink.
+
 ## Gate 3: MI Hardware Validation and Native Driver
 
 - run the Python calibration, block, MTU, response-mode, delay, and reconnect tests;
@@ -2112,6 +2119,10 @@ Deliverable: the same simulator-rendered frames displayed on the MI matrix.
 - confirm that pushed states update both simulator and MI outputs identically.
 
 Deliverable: an end-to-end ambient status appliance with one push interface.
+
+Status: the hardware-independent portion is complete and host-tested. The portable
+authenticated handler updates the simulator through localhost HTTP. Confirming the
+same path through the MI output remains part of Gate 3 hardware validation.
 
 ## Later V1 Gates
 

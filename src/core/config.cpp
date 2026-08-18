@@ -2,6 +2,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
 #include <charconv>
 #include <cstdint>
 #include <fstream>
@@ -19,6 +20,8 @@ constexpr std::size_t maximum_dimension = 256U;
 constexpr std::size_t maximum_pixels = 65'536U;
 constexpr std::size_t maximum_indicators = 1'024U;
 constexpr std::size_t maximum_statuses = 256U;
+constexpr std::size_t maximum_identifier_bytes = 64U;
+constexpr Duration maximum_appearance_duration = std::chrono::hours(24);
 
 void add_error(ConfigLoadResult& result, std::string message) {
     result.errors.push_back(std::move(message));
@@ -56,6 +59,34 @@ void reject_unknown_fields(
     const auto value = found->get<std::string>();
     if (value.empty()) {
         add_error(result, std::string(path) + "." + std::string(key) + " must not be empty");
+        return std::nullopt;
+    }
+    return value;
+}
+
+[[nodiscard]] bool valid_identifier(std::string_view value) {
+    return !value.empty() && value.size() <= maximum_identifier_bytes
+        && std::all_of(value.begin(), value.end(), [](unsigned char character) {
+            const auto is_ascii_alphanumeric =
+                (character >= 'A' && character <= 'Z')
+                || (character >= 'a' && character <= 'z')
+                || (character >= '0' && character <= '9');
+            return is_ascii_alphanumeric || character == '-'
+                || character == '_' || character == '.';
+        });
+}
+
+[[nodiscard]] std::optional<std::string> required_identifier(
+    const Json& object,
+    std::string_view key,
+    std::string_view path,
+    ConfigLoadResult& result) {
+    auto value = required_string(object, key, path, result);
+    if (value && !valid_identifier(*value)) {
+        add_error(
+            result,
+            std::string(path) + "." + std::string(key)
+                + " must contain 1-64 letters, digits, dots, underscores, or hyphens");
         return std::nullopt;
     }
     return value;
@@ -111,6 +142,116 @@ void reject_unknown_fields(
     return color;
 }
 
+[[nodiscard]] std::optional<Duration> duration_value(
+    const Json& value,
+    std::string_view path,
+    ConfigLoadResult& result) {
+    if (!value.is_string()) {
+        add_error(result, std::string(path) + " must be a duration string");
+        return std::nullopt;
+    }
+    const auto duration = parse_duration(value.get_ref<const std::string&>());
+    if (!duration || *duration <= Duration::zero()
+        || *duration > maximum_appearance_duration) {
+        add_error(result, std::string(path) + " must be greater than zero and no more than 24h");
+        return std::nullopt;
+    }
+    return duration;
+}
+
+[[nodiscard]] std::optional<double> percentage_value(
+    const Json& object,
+    std::string_view key,
+    double default_value,
+    std::string_view path,
+    ConfigLoadResult& result) {
+    const auto found = object.find(key);
+    if (found == object.end()) {
+        return default_value;
+    }
+
+    std::optional<std::int64_t> percent;
+    if (found->is_number_integer()) {
+        if (found->is_number_unsigned()) {
+            const auto value = found->get<std::uint64_t>();
+            if (value <= 100U) {
+                percent = static_cast<std::int64_t>(value);
+            }
+        } else {
+            percent = found->get<std::int64_t>();
+        }
+    } else if (found->is_string()) {
+        const auto& text = found->get_ref<const std::string&>();
+        if (text.size() > 1U && text.back() == '%') {
+            std::int64_t value{};
+            const std::string_view digits(text.data(), text.size() - 1U);
+            const auto parsed = std::from_chars(
+                digits.data(), digits.data() + digits.size(), value, 10);
+            if (parsed.ec == std::errc{} && parsed.ptr == digits.data() + digits.size()) {
+                percent = value;
+            }
+        }
+    }
+
+    if (!percent || *percent < 0 || *percent > 100) {
+        add_error(
+            result,
+            std::string(path) + "." + std::string(key)
+                + " must be a percentage from 0 to 100");
+        return std::nullopt;
+    }
+    return static_cast<double>(*percent) / 100.0;
+}
+
+struct ParsedSteps {
+    std::vector<ColorKeyframe> keyframes;
+    Duration cycle{};
+};
+
+[[nodiscard]] std::optional<ParsedSteps> parse_steps(
+    const Json& value,
+    std::string_view path,
+    std::size_t minimum_steps,
+    Transition transition,
+    ConfigLoadResult& result) {
+    if (!value.is_array() || value.size() < minimum_steps || value.size() > 64U) {
+        add_error(
+            result,
+            std::string(path) + " must contain between " + std::to_string(minimum_steps)
+                + " and 64 steps");
+        return std::nullopt;
+    }
+
+    ParsedSteps parsed;
+    for (std::size_t index = 0; index < value.size(); ++index) {
+        const auto& step = value[index];
+        const auto step_path = std::string(path) + "[" + std::to_string(index) + "]";
+        if (!step.is_object()) {
+            add_error(result, step_path + " must be an object");
+            return std::nullopt;
+        }
+        reject_unknown_fields(step, {"color", "duration"}, step_path, result);
+        const auto color_field = step.find("color");
+        const auto duration_field = step.find("duration");
+        if (color_field == step.end() || duration_field == step.end()) {
+            add_error(result, step_path + " requires color and duration");
+            return std::nullopt;
+        }
+        const auto color = color_value(*color_field, step_path + ".color", result);
+        const auto duration = duration_value(*duration_field, step_path + ".duration", result);
+        if (!color || !duration) {
+            return std::nullopt;
+        }
+        if (*duration > maximum_appearance_duration - parsed.cycle) {
+            add_error(result, std::string(path) + " total duration must not exceed 24h");
+            return std::nullopt;
+        }
+        parsed.keyframes.push_back({parsed.cycle, *color, transition});
+        parsed.cycle += *duration;
+    }
+    return parsed;
+}
+
 [[nodiscard]] std::optional<TimelineAppearance> parse_appearance(
     const Json& status,
     std::string_view path,
@@ -121,13 +262,18 @@ void reject_unknown_fields(
         return std::nullopt;
     }
     reject_unknown_fields(status, {"appearance"}, path, result);
+    reject_unknown_fields(
+        *appearance,
+        {"solid", "blink", "toggle", "fade", "pulse", "sequence", "cycle"},
+        std::string(path) + ".appearance",
+        result);
+    if (appearance->size() != 1U) {
+        add_error(result, std::string(path) + ".appearance must define exactly one appearance type");
+        return std::nullopt;
+    }
 
     if (const auto solid = appearance->find("solid"); solid != appearance->end()) {
-        reject_unknown_fields(*appearance, {"solid"}, std::string(path) + ".appearance", result);
         const auto color = color_value(*solid, std::string(path) + ".appearance.solid", result);
-        if (appearance->size() != 1U) {
-            add_error(result, std::string(path) + ".appearance must define exactly one appearance type");
-        }
         if (color) {
             return TimelineAppearance::solid(*color);
         }
@@ -135,7 +281,6 @@ void reject_unknown_fields(
     }
 
     if (const auto blink = appearance->find("blink"); blink != appearance->end()) {
-        reject_unknown_fields(*appearance, {"blink"}, std::string(path) + ".appearance", result);
         if (!blink->is_object()) {
             add_error(result, std::string(path) + ".appearance.blink must be an object");
             return std::nullopt;
@@ -145,46 +290,199 @@ void reject_unknown_fields(
             {"color", "on", "off"},
             std::string(path) + ".appearance.blink",
             result);
-        if (appearance->size() != 1U) {
-            add_error(result, std::string(path) + ".appearance must define exactly one appearance type");
-        }
-
         const auto color_field = blink->find("color");
         const auto on_field = blink->find("on");
         const auto off_field = blink->find("off");
-        if (color_field == blink->end()) {
-            add_error(result, std::string(path) + ".appearance.blink.color is required");
+        if (color_field == blink->end() || on_field == blink->end() || off_field == blink->end()) {
+            add_error(result, std::string(path) + ".appearance.blink requires color, on, and off");
+            return std::nullopt;
         }
-        if (on_field == blink->end() || !on_field->is_string()) {
-            add_error(result, std::string(path) + ".appearance.blink.on must be a duration string");
-        }
-        if (off_field == blink->end() || !off_field->is_string()) {
-            add_error(result, std::string(path) + ".appearance.blink.off must be a duration string");
-        }
-
-        const auto color = color_field == blink->end()
-            ? std::optional<Rgb>{}
-            : color_value(*color_field, std::string(path) + ".appearance.blink.color", result);
-        const auto on = on_field != blink->end() && on_field->is_string()
-            ? parse_duration(on_field->get_ref<const std::string&>())
-            : std::optional<Duration>{};
-        const auto off = off_field != blink->end() && off_field->is_string()
-            ? parse_duration(off_field->get_ref<const std::string&>())
-            : std::optional<Duration>{};
-
-        if (on_field != blink->end() && on_field->is_string() && (!on || *on <= Duration::zero())) {
-            add_error(result, std::string(path) + ".appearance.blink.on must be greater than zero");
-        }
-        if (off_field != blink->end() && off_field->is_string() && (!off || *off <= Duration::zero())) {
-            add_error(result, std::string(path) + ".appearance.blink.off must be greater than zero");
-        }
-        if (color && on && off && *on > Duration::zero() && *off > Duration::zero()) {
+        const auto color = color_value(
+            *color_field, std::string(path) + ".appearance.blink.color", result);
+        const auto on = duration_value(*on_field, std::string(path) + ".appearance.blink.on", result);
+        const auto off = duration_value(*off_field, std::string(path) + ".appearance.blink.off", result);
+        if (color && on && off && *on <= maximum_appearance_duration - *off) {
             return TimelineAppearance::blink(*color, *on, *off);
+        }
+        if (on && off && *on > maximum_appearance_duration - *off) {
+            add_error(result, std::string(path) + ".appearance.blink total duration must not exceed 24h");
         }
         return std::nullopt;
     }
 
-    add_error(result, std::string(path) + ".appearance must define solid or blink");
+    if (const auto toggle = appearance->find("toggle"); toggle != appearance->end()) {
+        const auto toggle_path = std::string(path) + ".appearance.toggle";
+        if (!toggle->is_object()) {
+            add_error(result, toggle_path + " must be an object");
+            return std::nullopt;
+        }
+        reject_unknown_fields(*toggle, {"colors", "period"}, toggle_path, result);
+        const auto colors = toggle->find("colors");
+        const auto period_field = toggle->find("period");
+        if (colors == toggle->end() || !colors->is_array()
+            || colors->size() < 2U || colors->size() > 16U) {
+            add_error(result, toggle_path + ".colors must contain between 2 and 16 colors");
+            return std::nullopt;
+        }
+        if (period_field == toggle->end()) {
+            add_error(result, toggle_path + ".period is required");
+            return std::nullopt;
+        }
+        const auto period = duration_value(*period_field, toggle_path + ".period", result);
+        if (!period || period->count() > maximum_appearance_duration.count()
+                / static_cast<Duration::rep>(colors->size())) {
+            if (period) {
+                add_error(result, toggle_path + " total duration must not exceed 24h");
+            }
+            return std::nullopt;
+        }
+
+        std::vector<ColorKeyframe> keyframes;
+        keyframes.reserve(colors->size());
+        for (std::size_t index = 0; index < colors->size(); ++index) {
+            const auto color = color_value(
+                (*colors)[index], toggle_path + ".colors[" + std::to_string(index) + "]", result);
+            if (!color) {
+                return std::nullopt;
+            }
+            keyframes.push_back({*period * static_cast<Duration::rep>(index), *color, Transition::step});
+        }
+        return TimelineAppearance(
+            std::move(keyframes),
+            *period * static_cast<Duration::rep>(colors->size()),
+            true);
+    }
+
+    if (const auto fade = appearance->find("fade"); fade != appearance->end()) {
+        const auto fade_path = std::string(path) + ".appearance.fade";
+        if (!fade->is_object()) {
+            add_error(result, fade_path + " must be an object");
+            return std::nullopt;
+        }
+        reject_unknown_fields(*fade, {"from", "to", "period"}, fade_path, result);
+        const auto from_field = fade->find("from");
+        const auto to_field = fade->find("to");
+        const auto period_field = fade->find("period");
+        if (from_field == fade->end() || to_field == fade->end() || period_field == fade->end()) {
+            add_error(result, fade_path + " requires from, to, and period");
+            return std::nullopt;
+        }
+        const auto from = color_value(*from_field, fade_path + ".from", result);
+        const auto to = color_value(*to_field, fade_path + ".to", result);
+        const auto period = duration_value(*period_field, fade_path + ".period", result);
+        if (!from || !to || !period || period->count() < 2) {
+            if (period && period->count() < 2) {
+                add_error(result, fade_path + ".period must be at least 2ms");
+            }
+            return std::nullopt;
+        }
+        return TimelineAppearance(
+            {
+                {Duration::zero(), *from, Transition::linear},
+                {Duration{period->count() / 2}, *to, Transition::linear},
+            },
+            *period,
+            true);
+    }
+
+    if (const auto pulse = appearance->find("pulse"); pulse != appearance->end()) {
+        const auto pulse_path = std::string(path) + ".appearance.pulse";
+        if (!pulse->is_object()) {
+            add_error(result, pulse_path + " must be an object");
+            return std::nullopt;
+        }
+        reject_unknown_fields(*pulse, {"color", "period", "minimum", "maximum"}, pulse_path, result);
+        const auto color_field = pulse->find("color");
+        const auto period_field = pulse->find("period");
+        if (color_field == pulse->end() || period_field == pulse->end()) {
+            add_error(result, pulse_path + " requires color and period");
+            return std::nullopt;
+        }
+        const auto color = color_value(*color_field, pulse_path + ".color", result);
+        const auto period = duration_value(*period_field, pulse_path + ".period", result);
+        const auto minimum = percentage_value(*pulse, "minimum", 0.1, pulse_path, result);
+        const auto maximum = percentage_value(*pulse, "maximum", 1.0, pulse_path, result);
+        if (!color || !period || !minimum || !maximum || period->count() < 2) {
+            if (period && period->count() < 2) {
+                add_error(result, pulse_path + ".period must be at least 2ms");
+            }
+            return std::nullopt;
+        }
+        if (*minimum > *maximum) {
+            add_error(result, pulse_path + ".minimum must not exceed maximum");
+            return std::nullopt;
+        }
+        return TimelineAppearance(
+            {
+                {Duration::zero(), scale_brightness(*color, *minimum), Transition::linear},
+                {Duration{period->count() / 2}, scale_brightness(*color, *maximum), Transition::linear},
+            },
+            *period,
+            true);
+    }
+
+    if (const auto sequence = appearance->find("sequence"); sequence != appearance->end()) {
+        const auto sequence_path = std::string(path) + ".appearance.sequence";
+        if (!sequence->is_object()) {
+            add_error(result, sequence_path + " must be an object");
+            return std::nullopt;
+        }
+        reject_unknown_fields(*sequence, {"repeat", "steps"}, sequence_path, result);
+        bool repeat = true;
+        if (const auto repeat_field = sequence->find("repeat"); repeat_field != sequence->end()) {
+            if (!repeat_field->is_boolean()) {
+                add_error(result, sequence_path + ".repeat must be boolean");
+                return std::nullopt;
+            }
+            repeat = repeat_field->get<bool>();
+        }
+        const auto steps = sequence->find("steps");
+        if (steps == sequence->end()) {
+            add_error(result, sequence_path + ".steps is required");
+            return std::nullopt;
+        }
+        auto parsed = parse_steps(*steps, sequence_path + ".steps", 1, Transition::step, result);
+        if (!parsed) {
+            return std::nullopt;
+        }
+        return TimelineAppearance(std::move(parsed->keyframes), parsed->cycle, repeat);
+    }
+
+    if (const auto cycle = appearance->find("cycle"); cycle != appearance->end()) {
+        const auto cycle_path = std::string(path) + ".appearance.cycle";
+        if (!cycle->is_object()) {
+            add_error(result, cycle_path + " must be an object");
+            return std::nullopt;
+        }
+        reject_unknown_fields(*cycle, {"transition", "steps"}, cycle_path, result);
+        auto transition = Transition::linear;
+        if (const auto field = cycle->find("transition"); field != cycle->end()) {
+            if (!field->is_string()
+                || (field->get_ref<const std::string&>() != "linear"
+                    && field->get_ref<const std::string&>() != "step")) {
+                add_error(result, cycle_path + ".transition must be linear or step");
+                return std::nullopt;
+            }
+            transition = field->get_ref<const std::string&>() == "linear"
+                ? Transition::linear
+                : Transition::step;
+        }
+        const auto steps = cycle->find("steps");
+        if (steps == cycle->end()) {
+            add_error(result, cycle_path + ".steps is required");
+            return std::nullopt;
+        }
+        auto parsed = parse_steps(*steps, cycle_path + ".steps", 2, transition, result);
+        if (!parsed) {
+            return std::nullopt;
+        }
+        return TimelineAppearance(std::move(parsed->keyframes), parsed->cycle, true);
+    }
+
+    add_error(
+        result,
+        std::string(path)
+            + ".appearance must define solid, blink, toggle, fade, pulse, sequence, or cycle");
     return std::nullopt;
 }
 
@@ -299,6 +597,13 @@ ConfigLoadResult load_config_file(const std::filesystem::path& path) {
         } else {
             for (auto status = statuses->begin(); status != statuses->end(); ++status) {
                 const auto path_text = std::string("statuses.") + status.key();
+                if (!valid_identifier(status.key())) {
+                    add_error(
+                        result,
+                        path_text
+                            + " name must contain 1-64 letters, digits, dots, underscores, or hyphens");
+                    continue;
+                }
                 if (!status.value().is_object()) {
                     add_error(result, path_text + " must be an object");
                     continue;
@@ -336,8 +641,8 @@ ConfigLoadResult load_config_file(const std::filesystem::path& path) {
                     result);
 
                 IndicatorConfig indicator;
-                const auto id = required_string(item, "id", path_text, result);
-                const auto source = required_string(item, "source", path_text, result);
+                const auto id = required_identifier(item, "id", path_text, result);
+                const auto source = required_identifier(item, "source", path_text, result);
                 const auto x = bounded_size(item, "x", path_text, 0, maximum_dimension, result);
                 const auto y = bounded_size(item, "y", path_text, 0, maximum_dimension, result);
                 const auto width = bounded_size(item, "width", path_text, 1, maximum_dimension, result);

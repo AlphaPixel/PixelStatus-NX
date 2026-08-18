@@ -18,5 +18,6 @@ struct Rgb {
 [[nodiscard]] std::optional<Rgb> parse_rgb_hex(std::string_view value);
 [[nodiscard]] std::string to_rgb_hex(Rgb color);
 [[nodiscard]] Rgb interpolate(Rgb from, Rgb to, double amount);
+[[nodiscard]] Rgb scale_brightness(Rgb color, double amount);
 
 }  // namespace pixelstatus
