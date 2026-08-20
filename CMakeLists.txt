@@ -130,6 +130,9 @@ if(PIXELSTATUS_BUILD_SIMULATOR)
             ${CMAKE_CURRENT_SOURCE_DIR}/examples/http-monitor.example.json
             $<TARGET_FILE_DIR:pixelstatus_simulator>/http-monitor.example.json
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            ${CMAKE_CURRENT_SOURCE_DIR}/examples/http-request.example.json
+            $<TARGET_FILE_DIR:pixelstatus_simulator>/http-request.example.json
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
             ${CMAKE_CURRENT_SOURCE_DIR}/examples/concurrent-monitors.example.json
             $<TARGET_FILE_DIR:pixelstatus_simulator>/concurrent-monitors.example.json
         COMMAND ${CMAKE_COMMAND} -E copy_if_different

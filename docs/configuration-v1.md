@@ -118,8 +118,9 @@ and inclusive `between`. Every referenced status must exist in the top-level
 
 ### HTTP
 
-The desktop HTTP adapter performs GET requests; method selection, request bodies,
-custom headers, credentials, and TLS are later increments.
+HTTP requests default to `GET`. The desktop adapter also supports `HEAD`, `POST`,
+`PUT`, `PATCH`, and `DELETE`, bounded custom headers, and a bounded text body. TLS
+and secret-reference resolution are separate increments.
 
 ```json
 {
@@ -154,6 +155,31 @@ custom headers, credentials, and TLS are later increments.
 Response bodies default to 4 KiB and cannot exceed a configured 64 KiB limit. URLs
 cannot contain embedded credentials or fragments.
 
+An optional request shape is:
+
+```json
+{
+  "method": "POST",
+  "headers": {
+    "Content-Type": "application/json",
+    "X-API-Key": "development-placeholder"
+  },
+  "body": "{\"operation\":\"health\"}"
+}
+```
+
+At most 32 headers are allowed. Header names, individual values, and all headers
+together are limited to 128 bytes, 2 KiB, and 8 KiB respectively. `Host`,
+`Content-Length`, `Transfer-Encoding`, and `Connection` remain owned by the
+transport. Values containing control characters are rejected. Request bodies are
+limited to 16 KiB and non-empty bodies are rejected for `GET` and `HEAD`.
+
+Literal authorization headers are accepted so the complete transport can be tested,
+but production credentials must not be committed with configuration. The planned
+secret-provider boundary will resolve named secrets from a desktop credential store
+or encrypted ESP32 storage. See
+[Appliance Monitoring and TLS](appliance-monitoring.md) for that design.
+
 Exactly one observation is selected:
 
 ```json
@@ -168,8 +194,9 @@ DNS, connection, timeout, or protocol failure. Invalid JSON and selected arrays 
 objects are `invalid_response` transport failures. A missing JSON Pointer produces
 a successful null observation so `exists` and `not_exists` rules can classify it.
 
-The complete runnable shape is in
-[`http-monitor.example.json`](../examples/http-monitor.example.json).
+Complete runnable shapes are in
+[`http-monitor.example.json`](../examples/http-monitor.example.json) and
+[`http-request.example.json`](../examples/http-request.example.json).
 
 ### TCP Connect
 

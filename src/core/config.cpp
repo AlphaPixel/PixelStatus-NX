@@ -34,6 +34,11 @@ constexpr std::size_t maximum_monitor_response_bytes = 64U * 1024U;
 constexpr std::size_t maximum_url_bytes = 2U * 1024U;
 constexpr std::size_t maximum_json_pointer_bytes = 512U;
 constexpr std::size_t maximum_host_bytes = 253U;
+constexpr std::size_t maximum_http_request_body_bytes = 16U * 1024U;
+constexpr std::size_t maximum_http_header_count = 32U;
+constexpr std::size_t maximum_http_header_name_bytes = 128U;
+constexpr std::size_t maximum_http_header_value_bytes = 2U * 1024U;
+constexpr std::size_t maximum_http_headers_bytes = 8U * 1024U;
 constexpr std::size_t maximum_tcp_send_bytes = 4U * 1024U;
 constexpr std::size_t maximum_tcp_delimiter_bytes = 256U;
 
@@ -748,6 +753,72 @@ struct ParsedSteps {
     return url.size() <= maximum_url_bytes && parse_http_url(url).has_value();
 }
 
+[[nodiscard]] std::string ascii_lower(std::string_view value) {
+    std::string lowered;
+    lowered.reserve(value.size());
+    for (const auto character : value) {
+        lowered.push_back(character >= 'A' && character <= 'Z'
+            ? static_cast<char>(character + ('a' - 'A'))
+            : character);
+    }
+    return lowered;
+}
+
+[[nodiscard]] bool valid_http_header_name(std::string_view name) {
+    if (name.empty() || name.size() > maximum_http_header_name_bytes) {
+        return false;
+    }
+    return std::all_of(name.begin(), name.end(), [](char character) {
+        const auto alpha_numeric = (character >= 'A' && character <= 'Z')
+            || (character >= 'a' && character <= 'z')
+            || (character >= '0' && character <= '9');
+        return alpha_numeric || character == '!' || character == '#'
+            || character == '$' || character == '%' || character == '&'
+            || character == static_cast<char>(0x27) || character == '*'
+            || character == '+' || character == '-' || character == '.'
+            || character == '^' || character == '_'
+            || character == static_cast<char>(0x60) || character == '|'
+            || character == '~';
+    });
+}
+
+[[nodiscard]] bool valid_http_header_value(std::string_view value) {
+    if (value.size() > maximum_http_header_value_bytes) {
+        return false;
+    }
+    return std::all_of(value.begin(), value.end(), [](char character) {
+        const auto byte = static_cast<unsigned char>(character);
+        return byte >= 0x20U && byte != 0x7FU;
+    });
+}
+
+[[nodiscard]] bool transport_owns_http_header(std::string_view lowered_name) {
+    return lowered_name == "host" || lowered_name == "content-length"
+        || lowered_name == "transfer-encoding" || lowered_name == "connection";
+}
+
+[[nodiscard]] std::optional<HttpMethod> parse_http_method_name(std::string_view method) {
+    if (method == "GET") {
+        return HttpMethod::get;
+    }
+    if (method == "HEAD") {
+        return HttpMethod::head;
+    }
+    if (method == "POST") {
+        return HttpMethod::post;
+    }
+    if (method == "PUT") {
+        return HttpMethod::put;
+    }
+    if (method == "PATCH") {
+        return HttpMethod::patch;
+    }
+    if (method == "DELETE") {
+        return HttpMethod::delete_;
+    }
+    return std::nullopt;
+}
+
 [[nodiscard]] bool valid_json_pointer(std::string_view pointer) {
     if (pointer.size() > maximum_json_pointer_bytes
         || (!pointer.empty() && pointer.front() != '/')) {
@@ -792,6 +863,84 @@ struct ParsedSteps {
     HttpMonitorConfig config;
     if (url) {
         config.url = *url;
+    }
+    bool request_valid = true;
+    if (const auto field = monitor.find("method"); field != monitor.end()) {
+        if (!field->is_string()) {
+            add_error(result, std::string(path) + ".method must be a string");
+            request_valid = false;
+        } else if (const auto method = parse_http_method_name(
+                       field->get_ref<const std::string&>())) {
+            config.method = *method;
+        } else {
+            add_error(
+                result,
+                std::string(path)
+                    + ".method must be GET, HEAD, POST, PUT, PATCH, or DELETE");
+            request_valid = false;
+        }
+    }
+    if (const auto field = monitor.find("headers"); field != monitor.end()) {
+        if (!field->is_object() || field->size() > maximum_http_header_count) {
+            add_error(result, std::string(path) + ".headers must be an object with at most 32 fields");
+            request_valid = false;
+        } else {
+            std::unordered_set<std::string> names;
+            std::size_t total_bytes{};
+            for (auto header = field->begin(); header != field->end(); ++header) {
+                const auto lowered_name = ascii_lower(header.key());
+                if (!valid_http_header_name(header.key())) {
+                    add_error(result, std::string(path) + ".headers contains an invalid field name");
+                    request_valid = false;
+                    continue;
+                }
+                if (!names.emplace(lowered_name).second) {
+                    add_error(
+                        result,
+                        std::string(path)
+                            + ".headers contains duplicate case-insensitive field names");
+                    request_valid = false;
+                    continue;
+                }
+                if (transport_owns_http_header(lowered_name)) {
+                    add_error(
+                        result,
+                        std::string(path) + ".headers cannot override " + header.key());
+                    request_valid = false;
+                    continue;
+                }
+                if (!header.value().is_string()
+                    || !valid_http_header_value(header.value().get_ref<const std::string&>())) {
+                    add_error(
+                        result,
+                        std::string(path) + ".headers." + header.key()
+                            + " must be a string of at most 2048 bytes without control characters");
+                    request_valid = false;
+                    continue;
+                }
+                const auto value = header.value().get<std::string>();
+                total_bytes += header.key().size() + value.size();
+                config.headers.push_back({header.key(), value});
+            }
+            if (total_bytes > maximum_http_headers_bytes) {
+                add_error(result, std::string(path) + ".headers exceed the 8192-byte aggregate limit");
+                request_valid = false;
+            }
+        }
+    }
+    if (const auto field = monitor.find("body"); field != monitor.end()) {
+        if (!field->is_string()
+            || field->get_ref<const std::string&>().size() > maximum_http_request_body_bytes) {
+            add_error(result, std::string(path) + ".body must be a string of at most 16384 bytes");
+            request_valid = false;
+        } else {
+            config.body = field->get<std::string>();
+        }
+    }
+    if (!config.body.empty()
+        && (config.method == HttpMethod::get || config.method == HttpMethod::head)) {
+        add_error(result, std::string(path) + ".body is not allowed with GET or HEAD");
+        request_valid = false;
     }
     if (const auto field = monitor.find("timeout"); field != monitor.end()) {
         const auto timeout = bounded_duration_value(
@@ -844,7 +993,7 @@ struct ParsedSteps {
         add_error(result, std::string(path) + ".observe contains an unknown observation");
         return std::nullopt;
     }
-    if (!url_valid) {
+    if (!url_valid || !request_valid) {
         return std::nullopt;
     }
     return config;
@@ -1093,7 +1242,8 @@ struct ParsedSteps {
         reject_unknown_fields(
             monitor,
             {
-                "id", "type", "url", "interval", "ttl", "timeout",
+                "id", "type", "url", "method", "headers", "body",
+                "interval", "ttl", "timeout",
                 "maximum_response_bytes", "observe", "evaluate",
                 "transport_failure_status", "no_match_status",
             },
@@ -1131,8 +1281,9 @@ struct ParsedSteps {
         reject_unknown_fields(
             monitor,
             {
-                "id", "type", "url", "host", "port", "family", "interval", "ttl",
-                "timeout", "send", "read_until", "maximum_response_bytes", "observe", "evaluate",
+                "id", "type", "url", "method", "headers", "body", "host", "port",
+                "family", "interval", "ttl", "timeout", "send", "read_until",
+                "maximum_response_bytes", "observe", "evaluate",
                 "transport_failure_status", "no_match_status",
             },
             path,

@@ -89,10 +89,12 @@ task and cancellation mechanisms.
 
 ## Desktop Network Adapters
 
-The HTTP runner performs bounded GET requests and can observe the
+The HTTP runner performs bounded `GET`, `HEAD`, `POST`, `PUT`, `PATCH`, and
+`DELETE` requests with optional headers and request bodies. It can observe the
 response status code, complete body, or a scalar selected by RFC 6901 JSON Pointer.
 It enforces connection/read/write/overall timeouts, disables redirects, rejects URL
-credentials, and streams response data through an explicit byte limit.
+credentials, and streams response data through an explicit byte limit. Transport
+headers such as `Host` and `Content-Length` remain owned by the adapter.
 
 The adapter intentionally distinguishes valid HTTP responses from transport errors.
 For example, HTTP 503 can be evaluated as an integer observation, while an invalid
@@ -121,8 +123,10 @@ resolver call itself remains non-cancellable.
 
 ## Deliberately Deferred
 
-HTTPS, custom HTTP request methods/headers/bodies, DNS record-type queries, binary or
-multi-step TCP exchanges, jitter, cron scheduling, and in-flight request cancellation
-remain deferred. HTTPS URLs are valid portable configuration, but the current
-desktop factory rejects them at startup because this build deliberately does not
-link a TLS library.
+HTTPS, secret-provider integration, cookie/session authentication, DNS record-type
+queries, binary or multi-step TCP exchanges, jitter, cron scheduling, and in-flight
+request cancellation remain deferred. HTTPS URLs are valid portable configuration,
+but the current desktop factory rejects them at startup because this build
+deliberately does not link a TLS library. The selected desktop and ESP32 TLS paths,
+plus the requirements of the first target appliances, are recorded in
+[Appliance Monitoring and TLS](appliance-monitoring.md).

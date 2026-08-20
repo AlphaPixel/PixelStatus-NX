@@ -31,6 +31,30 @@ class HealthHandler(BaseHTTPRequestHandler):
 
         self.send_json({"database": {"replication_lag": 12}, "healthy": True})
 
+    def do_POST(self) -> None:  # noqa: N802 - stdlib handler API
+        if self.path != "/query":
+            self.send_error(404)
+            return
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+        except ValueError:
+            self.send_error(400)
+            return
+        if length < 0 or length > 16 * 1024:
+            self.send_error(413)
+            return
+        try:
+            document = json.loads(self.rfile.read(length))
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            self.send_error(400)
+            return
+        accepted = (
+            self.headers.get("X-PixelStatus-Probe") == "desktop-example"
+            and self.headers.get_content_type() == "application/json"
+            and document == {"operation": "health"}
+        )
+        self.send_json({"accepted": accepted})
+
     def send_json(self, document: object) -> None:
         payload = json.dumps(document, separators=(",", ":")).encode("utf-8")
         self.send_response(200)

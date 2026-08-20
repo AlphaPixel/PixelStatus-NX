@@ -1,0 +1,80 @@
+{
+  "schema_version": 1,
+  "display": {
+    "width": 1,
+    "height": 1,
+    "background": "#000000"
+  },
+  "statuses": {
+    "ok": {
+      "appearance": {
+        "solid": "#00C853"
+      }
+    },
+    "warn": {
+      "appearance": {
+        "solid": "#FFD600"
+      }
+    },
+    "communication_failure": {
+      "appearance": {
+        "solid": "#FF00FF"
+      }
+    },
+    "stale": {
+      "appearance": {
+        "solid": "#FF9100"
+      }
+    },
+    "unknown": {
+      "appearance": {
+        "solid": "#6200EA"
+      }
+    }
+  },
+  "monitors": [
+    {
+      "id": "authenticated-query",
+      "type": "http",
+      "url": "http://127.0.0.1:18080/query",
+      "method": "POST",
+      "headers": {
+        "Content-Type": "application/json",
+        "X-PixelStatus-Probe": "desktop-example"
+      },
+      "body": "{\"operation\":\"health\"}",
+      "interval": "10s",
+      "ttl": "30s",
+      "timeout": "2s",
+      "maximum_response_bytes": 4096,
+      "observe": {
+        "json_pointer": "/accepted"
+      },
+      "evaluate": [
+        {
+          "when": {
+            "value": {
+              "equals": true
+            }
+          },
+          "status": "ok"
+        },
+        {
+          "otherwise": {
+            "status": "warn"
+          }
+        }
+      ]
+    }
+  ],
+  "indicators": [
+    {
+      "id": "authenticated-query-indicator",
+      "source": "authenticated-query",
+      "x": 0,
+      "y": 0,
+      "width": 1,
+      "height": 1
+    }
+  ]
+}

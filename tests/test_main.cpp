@@ -272,6 +272,35 @@ void test_http_monitor_configuration() {
     CHECK(http.json_pointer == "/database/replication_lag");
 }
 
+void test_http_request_configuration() {
+    const auto path = std::filesystem::path(PIXELSTATUS_TEST_DATA_DIR)
+        / "http-request.example.json";
+    const auto loaded = pixelstatus::load_config_file(path);
+    if (!loaded) {
+        for (const auto& error : loaded.errors) {
+            std::cerr << "HTTP request config error: " << error << '\n';
+        }
+    }
+    CHECK(loaded);
+    CHECK(loaded.config && loaded.config->monitors.size() == 1U);
+    if (!loaded.config || loaded.config->monitors.empty()) {
+        return;
+    }
+
+    const auto& monitor = loaded.config->monitors.front();
+    CHECK(monitor.id == "authenticated-query");
+    CHECK(std::holds_alternative<pixelstatus::HttpMonitorConfig>(monitor.source));
+    const auto& http = std::get<pixelstatus::HttpMonitorConfig>(monitor.source);
+    CHECK(http.method == pixelstatus::HttpMethod::post);
+    CHECK(http.headers.size() == 2U);
+    CHECK(std::any_of(http.headers.begin(), http.headers.end(), [](const auto& header) {
+        return header.name == "X-PixelStatus-Probe" && header.value == "desktop-example";
+    }));
+    CHECK(http.body == R"({"operation":"health"})");
+    CHECK(http.observation == pixelstatus::HttpObservation::json_pointer);
+    CHECK(http.json_pointer == "/accepted");
+}
+
 void test_tcp_connect_monitor_configuration() {
     const auto path = std::filesystem::path(PIXELSTATUS_TEST_DATA_DIR)
         / "tcp-connect.example.json";
@@ -784,6 +813,13 @@ void test_configuration_rejects_invalid_monitor() {
               "id": "invalid-monitor",
               "type": "http",
               "url": "http://127.0.0.1:99999/health",
+              "method": "TRACE",
+              "headers": {
+                "Bad Header": "invalid",
+                "Host": "override.invalid",
+                "X-Control": "bad\nvalue"
+              },
+              "body": "{}",
               "interval": "100ms",
               "observe": {"json_pointer": "not-a-pointer"},
               "evaluate": [
@@ -807,6 +843,11 @@ void test_configuration_rejects_invalid_monitor() {
         });
     };
     CHECK(errors_contain(".url must be"));
+    CHECK(errors_contain(".method must be"));
+    CHECK(errors_contain("invalid field name"));
+    CHECK(errors_contain("cannot override Host"));
+    CHECK(errors_contain("without control characters"));
+    CHECK(errors_contain(".body is not allowed"));
     CHECK(errors_contain(".interval must be between"));
     CHECK(errors_contain(".observe.json_pointer is invalid"));
     CHECK(errors_contain("undefined status"));
@@ -1149,6 +1190,15 @@ public:
             std::this_thread::sleep_for(100ms);
             response.set_content("eventually ready", "text/plain");
         });
+        server_.Post("/query", [](const httplib::Request& request, httplib::Response& response) {
+            const auto accepted = request.get_header_value("X-PixelStatus-Probe")
+                    == "desktop-example"
+                && request.get_header_value("Content-Type") == "application/json"
+                && request.body == R"({"operation":"health"})";
+            response.set_content(
+                accepted ? R"({"accepted":true})" : R"({"accepted":false})",
+                "application/json");
+        });
 
         port_ = server_.bind_to_any_port("127.0.0.1");
         if (port_ <= 0) {
@@ -1210,6 +1260,25 @@ void test_host_http_monitor_runner() {
     CHECK(std::get<std::int64_t>(result.value) == 12);
     CHECK(result.detail == "HTTP 200");
 
+    config.url = server.url("/query");
+    config.method = pixelstatus::HttpMethod::post;
+    config.headers = {
+        {"Content-Type", "application/json"},
+        {"X-PixelStatus-Probe", "desktop-example"},
+    };
+    config.body = R"({"operation":"health"})";
+    config.observation = pixelstatus::HttpObservation::json_pointer;
+    config.json_pointer = "/accepted";
+    created = pixelstatus::host::create_http_monitor_runner(config);
+    CHECK(created);
+    result = created.runner->run(std::chrono::steady_clock::now());
+    CHECK(result.transport_success);
+    CHECK(std::holds_alternative<bool>(result.value));
+    CHECK(std::get<bool>(result.value));
+
+    config.method = pixelstatus::HttpMethod::get;
+    config.headers.clear();
+    config.body.clear();
     config.url = server.url("/unavailable");
     config.observation = pixelstatus::HttpObservation::status_code;
     created = pixelstatus::host::create_http_monitor_runner(config);
@@ -1254,6 +1323,18 @@ void test_host_http_monitor_runner() {
     config.url = "https://example.test/health";
     CHECK(!pixelstatus::host::create_http_monitor_runner(config));
     config.url = "http://127.0.0.1:99999/health";
+    CHECK(!pixelstatus::host::create_http_monitor_runner(config));
+    config.url = server.url("/health");
+    config.method = static_cast<pixelstatus::HttpMethod>(99);
+    CHECK(!pixelstatus::host::create_http_monitor_runner(config));
+    config.method = pixelstatus::HttpMethod::get;
+    config.body = "not allowed";
+    CHECK(!pixelstatus::host::create_http_monitor_runner(config));
+    config.body.clear();
+    config.headers = {{"Host", "override.invalid"}};
+    CHECK(!pixelstatus::host::create_http_monitor_runner(config));
+    config.headers.clear();
+    config.timeout = 0ms;
     CHECK(!pixelstatus::host::create_http_monitor_runner(config));
 
     const auto example_path = std::filesystem::path(PIXELSTATUS_TEST_DATA_DIR)
@@ -1680,6 +1761,7 @@ int main() {
     test_mi_protocol_vectors();
     test_sample_configuration();
     test_http_monitor_configuration();
+    test_http_request_configuration();
     test_tcp_connect_monitor_configuration();
     test_dns_monitor_configuration();
     test_tcp_exchange_monitor_configuration();

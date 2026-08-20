@@ -36,8 +36,25 @@ enum class HttpObservation {
     json_pointer,
 };
 
+enum class HttpMethod {
+    get,
+    head,
+    post,
+    put,
+    patch,
+    delete_,
+};
+
+struct HttpHeader {
+    std::string name;
+    std::string value;
+};
+
 struct HttpMonitorConfig {
     std::string url;
+    HttpMethod method{HttpMethod::get};
+    std::vector<HttpHeader> headers;
+    std::string body;
     Duration timeout{std::chrono::seconds(2)};
     std::size_t maximum_response_bytes{4U * 1024U};
     HttpObservation observation{HttpObservation::status_code};

@@ -25,8 +25,9 @@ documented in [Configuration V1](docs/configuration-v1.md).
 The host monitor-engine layer—normalized monitor results, ordered evaluation rules,
 and deterministic interval scheduling—is described in
 [Host Monitor Engine](docs/monitor-engine.md).
-Declarative HTTP GET monitoring with bounded body, timeout, status/body/JSON-Pointer
-observation, and a loopback-tested desktop adapter now uses those contracts. A
+Declarative HTTP monitoring with bounded methods, headers, request/response bodies,
+timeouts, status/body/JSON-Pointer observation, and a loopback-tested desktop
+adapter now uses those contracts. A
 bounded desktop worker pool prevents one slow check from stalling unrelated
 monitors or either display backend.
 TCP-connect monitoring uses the same scheduler and evaluator while exposing
@@ -38,6 +39,9 @@ and lookup-latency observations without changing those contracts.
 The same rendered framebuffer is also available through a responsive
 [Browser Display Backend](docs/http-display.md), including a read-only frame API and
 headless host mode.
+The planned desktop/ESP32 TLS split and the integration requirements for TrueNAS
+CORE, UniFi, Netgear cable modems, and Starlink are described in
+[Appliance Monitoring and TLS](docs/appliance-monitoring.md).
 
 ---
 
@@ -2154,8 +2158,9 @@ persistence hardening, management UI, and OTA. Each monitor and output backend s
 enter through the established state, rendering, and driver contracts.
 
 Status: the portable interval scheduler, runner boundary, normalized result, generic
-evaluator, strict monitor JSON grammar, and desktop HTTP/JSON, TCP-connect,
+evaluator, strict monitor JSON grammar, and desktop HTTP/JSON (including request
+methods, headers, and bodies), TCP-connect,
 TCP-exchange, and DNS runners are host-tested. The Win32 host also has a bounded
 multi-worker executor with per-monitor in-flight exclusion. HTTPS, additional
-network runners, jitter/cron support, and in-flight cancellation remain incremental
-follow-on work.
+network runners, secret-provider integration, jitter/cron support, and in-flight
+cancellation remain incremental follow-on work.
