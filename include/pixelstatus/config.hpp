@@ -50,6 +50,21 @@ struct TcpConnectMonitorConfig {
     Duration timeout{std::chrono::seconds(2)};
 };
 
+enum class TcpExchangeObservation {
+    body,
+    latency_ms,
+};
+
+struct TcpExchangeMonitorConfig {
+    std::string host;
+    std::uint16_t port{};
+    Duration timeout{std::chrono::seconds(2)};
+    std::string send;
+    std::string read_until;
+    std::size_t maximum_response_bytes{4U * 1024U};
+    TcpExchangeObservation observation{TcpExchangeObservation::body};
+};
+
 enum class DnsAddressFamily {
     any,
     ipv4,
@@ -72,6 +87,7 @@ struct DnsMonitorConfig {
 using MonitorSourceConfig = std::variant<
     HttpMonitorConfig,
     TcpConnectMonitorConfig,
+    TcpExchangeMonitorConfig,
     DnsMonitorConfig>;
 
 struct PullMonitorConfig {

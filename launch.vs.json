@@ -130,6 +130,25 @@
       ]
     },
     {
+      "name": "Simulator - TCP Exchange Monitor",
+      "projectTarget": "pixelstatus_simulator.exe (Debug\\pixelstatus_simulator.exe)",
+      "program": "${cmake.binaryDir}/Debug/pixelstatus_simulator.exe",
+      "args": [
+        "${workspaceRoot}/examples/tcp-exchange.example.json",
+        "--no-window",
+        "--api-token",
+        "pixelstatus-vs-debug",
+        "--api-port",
+        "18867",
+        "--web-display-port",
+        "18868",
+        "--web-refresh-ms",
+        "100",
+        "--monitor-workers",
+        "2"
+      ]
+    },
+    {
       "name": "Simulator - Timed Browser Smoke (10 seconds)",
       "projectTarget": "pixelstatus_simulator.exe (Debug\\pixelstatus_simulator.exe)",
       "program": "${cmake.binaryDir}/Debug/pixelstatus_simulator.exe",

@@ -1,0 +1,77 @@
+{
+  "schema_version": 1,
+  "display": {
+    "width": 1,
+    "height": 1,
+    "background": "#000000"
+  },
+  "statuses": {
+    "ok": {
+      "appearance": {
+        "solid": "#00C853"
+      }
+    },
+    "warn": {
+      "appearance": {
+        "solid": "#FFD600"
+      }
+    },
+    "communication_failure": {
+      "appearance": {
+        "solid": "#FF00FF"
+      }
+    },
+    "stale": {
+      "appearance": {
+        "solid": "#FF9100"
+      }
+    },
+    "unknown": {
+      "appearance": {
+        "solid": "#6200EA"
+      }
+    }
+  },
+  "monitors": [
+    {
+      "id": "raw-http-banner",
+      "type": "tcp_exchange",
+      "host": "127.0.0.1",
+      "port": 18080,
+      "interval": "10s",
+      "ttl": "30s",
+      "timeout": "2s",
+      "send": "GET /health HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n",
+      "read_until": "\r\n\r\n",
+      "maximum_response_bytes": 4096,
+      "observe": {
+        "body": true
+      },
+      "evaluate": [
+        {
+          "when": {
+            "value": {
+              "contains": "200 OK"
+            }
+          },
+          "status": "ok"
+        },
+        {
+          "otherwise": {
+            "status": "warn"
+          }
+        }
+      ]
+    }
+  ],
+  "indicators": [
+    {
+      "id": "raw-http-banner-indicator",
+      "source": "raw-http-banner",
+      "x": 0,
+      "y": 0,
+      "width": 1,
+      "height": 1
+    }
+  ]
+}

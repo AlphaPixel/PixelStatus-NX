@@ -3,7 +3,8 @@
 The canonical machine-readable contract is
 [`pixelstatus-config-v1.schema.json`](../schemas/pixelstatus-config-v1.schema.json).
 The runtime parser additionally checks total display size, indicator bounds,
-duplicate indicator IDs, and aggregate appearance durations.
+duplicate indicator IDs, aggregate appearance durations, and cross-field constraints
+such as the TCP-exchange response limit relative to its delimiter.
 
 ## Top-Level Shape
 
@@ -104,9 +105,9 @@ that point.
 
 ## Pull Monitors
 
-`monitors` is optional and currently supports `http`, `tcp_connect`, and `dns`.
-All use the same interval, optional TTL, timeout, transport-failure status, no-match
-status, and ordered evaluation rules.
+`monitors` is optional and currently supports `http`, `tcp_connect`, `tcp_exchange`,
+and `dns`. All use the same interval, optional TTL, timeout, transport-failure
+status, no-match status, and ordered evaluation rules.
 
 Intervals are limited to 1 second through 24 hours, TTL to seven days, and timeout
 to 30 seconds. Evaluation rules are ordered and the first match wins. Supported
@@ -209,6 +210,66 @@ Name-resolution failures, connection failures, and timeouts are normalized throu
 the common transport-failure status. A TCP connect check does not transmit or read
 application data. The complete runnable shape is in
 [`tcp-connect.example.json`](../examples/tcp-connect.example.json).
+
+### TCP Exchange
+
+The `tcp_exchange` monitor connects to a TCP service, optionally transmits a text
+payload, and reads a bounded response through a required delimiter. It is intended
+for simple greeting, banner, and request/response checks that do not justify a
+dedicated application-protocol runner.
+
+```json
+{
+  "id": "raw-http-banner",
+  "type": "tcp_exchange",
+  "host": "127.0.0.1",
+  "port": 18080,
+  "interval": "10s",
+  "ttl": "30s",
+  "timeout": "2s",
+  "send": "GET /health HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n",
+  "read_until": "\r\n\r\n",
+  "maximum_response_bytes": 4096,
+  "observe": {
+    "body": true
+  },
+  "evaluate": [
+    {
+      "when": {
+        "value": {
+          "contains": "200 OK"
+        }
+      },
+      "status": "ok"
+    },
+    {
+      "otherwise": {
+        "status": "warn"
+      }
+    }
+  ]
+}
+```
+
+`send` is optional and limited to 4 KiB, allowing checks of services that send a
+greeting immediately after connection. `read_until` is required and limited to 256
+bytes. The response limit defaults to 4 KiB and may be configured from 1 byte to
+64 KiB, but it cannot be smaller than the delimiter.
+
+Exactly one observation is selected:
+
+```json
+{"body": true}
+{"latency_ms": true}
+```
+
+The body observation includes the terminating delimiter and excludes any bytes
+received after it. Resolution, connection, sending, and reading share one overall
+deadline. Closing the connection before the delimiter is a protocol failure, and
+reaching the response limit first is an oversized-response failure. Use
+`tcp_connect` when application data does not need to be exchanged. The complete
+runnable shape is in
+[`tcp-exchange.example.json`](../examples/tcp-exchange.example.json).
 
 ### DNS
 

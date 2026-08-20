@@ -3,6 +3,7 @@
 #include "pixelstatus/host/dns_monitor_runner.hpp"
 #include "pixelstatus/host/http_monitor_runner.hpp"
 #include "pixelstatus/host/tcp_connect_monitor_runner.hpp"
+#include "pixelstatus/host/tcp_exchange_monitor_runner.hpp"
 
 #include <type_traits>
 #include <utility>
@@ -17,6 +18,8 @@ MonitorRunnerCreationResult create_monitor_runner(MonitorSourceConfig config) {
             return create_http_monitor_runner(std::move(source));
         } else if constexpr (std::is_same_v<Source, TcpConnectMonitorConfig>) {
             return create_tcp_connect_monitor_runner(std::move(source));
+        } else if constexpr (std::is_same_v<Source, TcpExchangeMonitorConfig>) {
+            return create_tcp_exchange_monitor_runner(std::move(source));
         } else {
             return create_dns_monitor_runner(std::move(source));
         }

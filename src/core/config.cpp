@@ -34,6 +34,8 @@ constexpr std::size_t maximum_monitor_response_bytes = 64U * 1024U;
 constexpr std::size_t maximum_url_bytes = 2U * 1024U;
 constexpr std::size_t maximum_json_pointer_bytes = 512U;
 constexpr std::size_t maximum_host_bytes = 253U;
+constexpr std::size_t maximum_tcp_send_bytes = 4U * 1024U;
+constexpr std::size_t maximum_tcp_delimiter_bytes = 256U;
 
 void add_error(ConfigLoadResult& result, std::string message) {
     result.errors.push_back(std::move(message));
@@ -888,6 +890,116 @@ struct ParsedSteps {
     return config;
 }
 
+[[nodiscard]] std::optional<TcpExchangeMonitorConfig> parse_tcp_exchange_monitor(
+    const Json& monitor,
+    std::string_view path,
+    ConfigLoadResult& result) {
+    const auto host = required_string(monitor, "host", path, result);
+    const auto host_valid = host && valid_network_host(*host);
+    if (host && !host_valid) {
+        add_error(
+            result,
+            std::string(path)
+                + ".host must be a hostname or unbracketed IP address of at most 253 bytes");
+    }
+    const auto port = bounded_size(monitor, "port", path, 1U, 65'535U, result);
+
+    TcpExchangeMonitorConfig config;
+    if (host) {
+        config.host = *host;
+    }
+    if (port) {
+        config.port = static_cast<std::uint16_t>(*port);
+    }
+
+    bool timeout_valid = true;
+    if (const auto field = monitor.find("timeout"); field != monitor.end()) {
+        const auto timeout = bounded_duration_value(
+            *field,
+            std::string(path) + ".timeout",
+            Duration{1},
+            maximum_monitor_timeout,
+            result);
+        if (timeout) {
+            config.timeout = *timeout;
+        } else {
+            timeout_valid = false;
+        }
+    }
+
+    bool send_valid = true;
+    if (const auto field = monitor.find("send"); field != monitor.end()) {
+        if (!field->is_string()
+            || field->get_ref<const std::string&>().size() > maximum_tcp_send_bytes) {
+            add_error(result, std::string(path) + ".send must be a string of at most 4096 bytes");
+            send_valid = false;
+        } else {
+            config.send = field->get<std::string>();
+        }
+    }
+
+    bool delimiter_valid = true;
+    const auto delimiter = monitor.find("read_until");
+    if (delimiter == monitor.end() || !delimiter->is_string()
+        || delimiter->get_ref<const std::string&>().empty()
+        || delimiter->get_ref<const std::string&>().size() > maximum_tcp_delimiter_bytes) {
+        add_error(result, std::string(path) + ".read_until must contain 1-256 bytes");
+        delimiter_valid = false;
+    } else {
+        config.read_until = delimiter->get<std::string>();
+    }
+
+    bool response_limit_valid = true;
+    if (monitor.contains("maximum_response_bytes")) {
+        const auto maximum = bounded_size(
+            monitor,
+            "maximum_response_bytes",
+            path,
+            1U,
+            maximum_monitor_response_bytes,
+            result);
+        if (maximum) {
+            config.maximum_response_bytes = *maximum;
+        } else {
+            response_limit_valid = false;
+        }
+    }
+    if (delimiter_valid && response_limit_valid
+        && config.maximum_response_bytes < config.read_until.size()) {
+        add_error(
+            result,
+            std::string(path)
+                + ".maximum_response_bytes must be at least the read_until byte length");
+        response_limit_valid = false;
+    }
+
+    bool observation_valid = true;
+    const auto observe = monitor.find("observe");
+    if (observe == monitor.end() || !observe->is_object() || observe->size() != 1U) {
+        add_error(result, std::string(path) + ".observe must define exactly one observation");
+        observation_valid = false;
+    } else {
+        const auto observation = observe->begin();
+        if (!observation.value().is_boolean() || !observation.value().get<bool>()) {
+            add_error(result, std::string(path) + ".observe values must be true");
+            observation_valid = false;
+        } else if (observation.key() == "body") {
+            config.observation = TcpExchangeObservation::body;
+        } else if (observation.key() == "latency_ms") {
+            config.observation = TcpExchangeObservation::latency_ms;
+        } else {
+            add_error(result, std::string(path) + ".observe contains an unknown observation");
+            observation_valid = false;
+        }
+    }
+
+    if (!host_valid || !port || !timeout_valid || !send_valid || !delimiter_valid
+        || !response_limit_valid || !observation_valid) {
+        return std::nullopt;
+    }
+    return config;
+}
+
 [[nodiscard]] std::optional<DnsMonitorConfig> parse_dns_monitor(
     const Json& monitor,
     std::string_view path,
@@ -996,6 +1108,16 @@ struct ParsedSteps {
             },
             path,
             result);
+    } else if (type && *type == "tcp_exchange") {
+        reject_unknown_fields(
+            monitor,
+            {
+                "id", "type", "host", "port", "interval", "ttl", "timeout",
+                "send", "read_until", "maximum_response_bytes", "observe", "evaluate",
+                "transport_failure_status", "no_match_status",
+            },
+            path,
+            result);
     } else if (type && *type == "dns") {
         reject_unknown_fields(
             monitor,
@@ -1010,13 +1132,15 @@ struct ParsedSteps {
             monitor,
             {
                 "id", "type", "url", "host", "port", "family", "interval", "ttl",
-                "timeout", "maximum_response_bytes", "observe", "evaluate",
+                "timeout", "send", "read_until", "maximum_response_bytes", "observe", "evaluate",
                 "transport_failure_status", "no_match_status",
             },
             path,
             result);
         if (type) {
-            add_error(result, std::string(path) + ".type must be http, tcp_connect, or dns");
+            add_error(
+                result,
+                std::string(path) + ".type must be http, tcp_connect, tcp_exchange, or dns");
         }
     }
     const auto interval_field = monitor.find("interval");
@@ -1048,6 +1172,10 @@ struct ParsedSteps {
     } else if (type && *type == "tcp_connect") {
         if (const auto tcp = parse_tcp_connect_monitor(monitor, path, result)) {
             source = *tcp;
+        }
+    } else if (type && *type == "tcp_exchange") {
+        if (const auto exchange = parse_tcp_exchange_monitor(monitor, path, result)) {
+            source = *exchange;
         }
     } else if (type && *type == "dns") {
         if (const auto dns = parse_dns_monitor(monitor, path, result)) {

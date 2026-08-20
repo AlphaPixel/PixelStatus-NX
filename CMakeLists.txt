@@ -70,7 +70,9 @@ if(PIXELSTATUS_BUILD_HOST_HTTP)
         src/host/http_monitor_runner.cpp
         src/host/monitor_executor.cpp
         src/host/monitor_runner_factory.cpp
+        src/host/socket_transport.cpp
         src/host/tcp_connect_monitor_runner.cpp
+        src/host/tcp_exchange_monitor_runner.cpp
     )
     target_include_directories(pixelstatus_host PUBLIC include)
     target_link_libraries(pixelstatus_host PRIVATE
@@ -136,6 +138,9 @@ if(PIXELSTATUS_BUILD_SIMULATOR)
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             ${CMAKE_CURRENT_SOURCE_DIR}/examples/dns-monitor.example.json
             $<TARGET_FILE_DIR:pixelstatus_simulator>/dns-monitor.example.json
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            ${CMAKE_CURRENT_SOURCE_DIR}/examples/tcp-exchange.example.json
+            $<TARGET_FILE_DIR:pixelstatus_simulator>/tcp-exchange.example.json
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             ${CMAKE_CURRENT_SOURCE_DIR}/THIRD_PARTY_NOTICES.md
             $<TARGET_FILE_DIR:pixelstatus_simulator>/THIRD_PARTY_NOTICES.md

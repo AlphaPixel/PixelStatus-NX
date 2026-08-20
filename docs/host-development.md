@@ -47,6 +47,7 @@ adds these shared entries to the **Startup Item** dropdown:
 | `Simulator - Concurrent HTTP Monitors` | Headless two-monitor slow/fast concurrency example | Status API `18837`, browser `18838` |
 | `Simulator - TCP Connect Monitor` | Headless TCP-connect latency example | Status API `18847`, browser `18848` |
 | `Simulator - DNS Monitor` | Headless localhost IPv4 resolution example | Status API `18857`, browser `18858` |
+| `Simulator - TCP Exchange Monitor` | Headless bounded request/response example | Status API `18867`, browser `18868` |
 | `Simulator - Timed Browser Smoke (10 seconds)` | Headless, API-disabled, 60 FPS browser exercise that exits automatically | Browser `18828` |
 | `Tests - Active CMake Preset` | Runs `pixelstatus_tests` under the debugger | None |
 
@@ -112,6 +113,14 @@ state publication without requiring an external fixture:
 
 ```powershell
 .\tools\test-dns-monitor.ps1
+```
+
+The TCP-exchange smoke test sends a raw request to the local fixture, reads the
+response headers through their delimiter, evaluates the response text, and verifies
+the published state:
+
+```powershell
+.\tools\test-tcp-exchange.ps1
 ```
 
 Python is used only for the mock upstream fixture; the monitor implementations and
@@ -207,8 +216,8 @@ See [Configuration V1](configuration-v1.md) for the status and appearance model.
 
 The core library contains host-tested runner, evaluator, and deterministic
 interval-engine contracts. Scripted runners exercise time and failure edge cases;
-in-process loopback tests exercise the concrete HTTP/JSON, TCP-connect, and DNS
-adapters through state publication, TTL, and rendering. See
+in-process loopback tests exercise the concrete HTTP/JSON, TCP-connect, TCP-exchange,
+and DNS adapters through state publication, TTL, and rendering. See
 [Host Monitor Engine](monitor-engine.md) for comparison and scheduling semantics.
 
 The simulator automatically registers an optional `monitors` array from its JSON
@@ -217,8 +226,9 @@ Each configured monitor can have only one request in flight at a time. See
 [`http-monitor.example.json`](../examples/http-monitor.example.json) for a complete
 single-monitor configuration and
 [`concurrent-monitors.example.json`](../examples/concurrent-monitors.example.json)
-for the deterministic slow/fast fixture. The second supported transport is shown in
-[`tcp-connect.example.json`](../examples/tcp-connect.example.json), and standalone
+for the deterministic slow/fast fixture. TCP reachability and bounded text exchanges
+are shown in [`tcp-connect.example.json`](../examples/tcp-connect.example.json) and
+[`tcp-exchange.example.json`](../examples/tcp-exchange.example.json). Standalone
 address resolution is shown in
 [`dns-monitor.example.json`](../examples/dns-monitor.example.json).
 
@@ -254,6 +264,6 @@ scheduling.
 The host build does not include ESP-IDF, a cross-compiler, NimBLE transport, Wi-Fi,
 NVS, LittleFS, GPIO, or OTA support. MI packet construction is host-tested, but actual
 BLE behavior remains a hardware validation task. HTTPS and additional pull
-transports remain deferred; HTTP GET, scalar JSON extraction, TCP connect, DNS
-address resolution, evaluation, concurrent interval execution, and display
-responsiveness are implemented and host-tested.
+transports remain deferred; HTTP GET, scalar JSON extraction, TCP connect, bounded
+TCP text exchange, DNS address resolution, evaluation, concurrent interval
+execution, and display responsiveness are implemented and host-tested.

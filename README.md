@@ -22,8 +22,8 @@ The current host implementation also accepts authenticated status pushes over a
 loopback HTTP endpoint; its transport-independent handler is intended to be reused
 behind the eventual ESP32 HTTP server. The supported JSON appearance syntax is
 documented in [Configuration V1](docs/configuration-v1.md).
-The next host-only layer—normalized monitor results, ordered evaluation rules, and
-deterministic interval scheduling—is described in
+The host monitor-engine layer—normalized monitor results, ordered evaluation rules,
+and deterministic interval scheduling—is described in
 [Host Monitor Engine](docs/monitor-engine.md).
 Declarative HTTP GET monitoring with bounded body, timeout, status/body/JSON-Pointer
 observation, and a loopback-tested desktop adapter now uses those contracts. A
@@ -31,6 +31,8 @@ bounded desktop worker pool prevents one slow check from stalling unrelated
 monitors or either display backend.
 TCP-connect monitoring uses the same scheduler and evaluator while exposing
 successful connection latency as a numeric observation.
+Bounded TCP-exchange monitoring adds optional text transmission, delimiter-based
+response capture, and body or total-latency observation for simple service checks.
 Standalone DNS monitoring adds address-family filtering plus address-list, count,
 and lookup-latency observations without changing those contracts.
 The same rendered framebuffer is also available through a responsive
@@ -580,6 +582,9 @@ expect:
 ```
 
 This covers many simple service checks without implementing full application protocols.
+The implemented V1 grammar uses a bounded optional `send` string, required
+`read_until` delimiter, and either body or total-latency observation; see
+[Configuration V1](docs/configuration-v1.md#tcp-exchange) for the runnable contract.
 
 ---
 
@@ -2149,7 +2154,8 @@ persistence hardening, management UI, and OTA. Each monitor and output backend s
 enter through the established state, rendering, and driver contracts.
 
 Status: the portable interval scheduler, runner boundary, normalized result, generic
-evaluator, strict monitor JSON grammar, and desktop HTTP/JSON, TCP-connect, and DNS
-runners are host-tested. The Win32 host also has a bounded multi-worker executor
-with per-monitor in-flight exclusion. HTTPS, additional network runners,
-jitter/cron support, and in-flight cancellation remain incremental follow-on work.
+evaluator, strict monitor JSON grammar, and desktop HTTP/JSON, TCP-connect,
+TCP-exchange, and DNS runners are host-tested. The Win32 host also has a bounded
+multi-worker executor with per-monitor in-flight exclusion. HTTPS, additional
+network runners, jitter/cron support, and in-flight cancellation remain incremental
+follow-on work.

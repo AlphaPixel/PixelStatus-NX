@@ -1,12 +1,13 @@
 #include "pixelstatus/host/dns_monitor_runner.hpp"
 
+#include "socket_transport.hpp"
+
 #include <algorithm>
 #include <array>
 #include <chrono>
 #include <cstdint>
 #include <memory>
 #include <string>
-#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -22,42 +23,7 @@
 namespace pixelstatus::host {
 namespace {
 
-constexpr std::size_t maximum_host_bytes = 253U;
 constexpr Duration maximum_timeout = std::chrono::seconds(30);
-
-#ifdef _WIN32
-
-class SocketRuntime {
-public:
-    SocketRuntime() {
-        WSADATA data{};
-        error_ = WSAStartup(MAKEWORD(2, 2), &data);
-    }
-
-    ~SocketRuntime() {
-        if (error_ == 0) {
-            WSACleanup();
-        }
-    }
-
-    [[nodiscard]] int error() const noexcept {
-        return error_;
-    }
-
-private:
-    int error_{};
-};
-
-#else
-
-class SocketRuntime {
-public:
-    [[nodiscard]] int error() const noexcept {
-        return 0;
-    }
-};
-
-#endif
 
 class AddressListGuard {
 public:
@@ -75,18 +41,6 @@ public:
 private:
     addrinfo* addresses_;
 };
-
-bool valid_host(std::string_view host) {
-    if (host.empty() || host.size() > maximum_host_bytes) {
-        return false;
-    }
-    return std::none_of(host.begin(), host.end(), [](char character) {
-        const auto byte = static_cast<unsigned char>(character);
-        return byte <= 0x20U || byte == 0x7FU
-            || character == '/' || character == '?' || character == '#'
-            || character == '[' || character == ']';
-    });
-}
 
 int native_family(DnsAddressFamily family) {
     switch (family) {
@@ -137,11 +91,10 @@ public:
         const auto begin = std::chrono::steady_clock::now();
         MonitorResult result;
 
-        static SocketRuntime runtime;
-        if (runtime.error() != 0) {
+        if (const auto runtime_error = detail::socket_runtime_error(); runtime_error != 0) {
             result.error = MonitorError::internal;
             result.detail = "Socket runtime initialization failed ("
-                + std::to_string(runtime.error()) + ')';
+                + std::to_string(runtime_error) + ')';
             finish_result(result, begin);
             return result;
         }
@@ -217,7 +170,7 @@ private:
 }  // namespace
 
 MonitorRunnerCreationResult create_dns_monitor_runner(DnsMonitorConfig config) {
-    if (!valid_host(config.host)) {
+    if (!detail::valid_network_host(config.host)) {
         return {nullptr, "DNS host is invalid"};
     }
     if (native_family(config.family) < 0) {

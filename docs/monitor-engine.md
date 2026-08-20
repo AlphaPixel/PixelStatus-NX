@@ -107,6 +107,12 @@ HTTP, so neither the evaluator nor scheduler depends on the transport type.
 The shared deadline begins before resolution, but the operating system's blocking
 resolver call cannot itself be cancelled by the current host executor.
 
+The TCP-exchange runner builds on the same private socket transport. It optionally
+sends a bounded text payload, reads through a configured delimiter under a bounded
+response size, and exposes either the response text or total exchange latency. One
+deadline covers resolution, connection, sending, and reading. Premature peer close,
+timeout, and response-size exhaustion remain distinct normalized failures.
+
 The standalone DNS runner uses the same resolver boundary with explicit IPv4,
 IPv6, or combined selection. It normalizes results into a sorted unique address
 list and can observe that list, its address count, or lookup latency. A result that
@@ -115,7 +121,8 @@ resolver call itself remains non-cancellable.
 
 ## Deliberately Deferred
 
-HTTPS, custom request methods/headers/bodies, DNS record-type queries, TCP exchanges,
-jitter, cron scheduling, and in-flight request cancellation remain deferred. HTTPS
-URLs are valid portable configuration, but the current desktop factory rejects them
-at startup because this build deliberately does not link a TLS library.
+HTTPS, custom HTTP request methods/headers/bodies, DNS record-type queries, binary or
+multi-step TCP exchanges, jitter, cron scheduling, and in-flight request cancellation
+remain deferred. HTTPS URLs are valid portable configuration, but the current
+desktop factory rejects them at startup because this build deliberately does not
+link a TLS library.

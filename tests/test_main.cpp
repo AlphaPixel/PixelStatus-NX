@@ -15,6 +15,7 @@
 #include "pixelstatus/host/monitor_executor.hpp"
 #include "pixelstatus/host/monitor_runner_factory.hpp"
 #include "pixelstatus/host/tcp_connect_monitor_runner.hpp"
+#include "pixelstatus/host/tcp_exchange_monitor_runner.hpp"
 
 #include <httplib.h>
 #include <nlohmann/json.hpp>
@@ -324,6 +325,34 @@ void test_dns_monitor_configuration() {
     CHECK(dns.family == pixelstatus::DnsAddressFamily::ipv4);
     CHECK(dns.observation == pixelstatus::DnsObservation::addresses);
     CHECK(dns.timeout == 1s);
+}
+
+void test_tcp_exchange_monitor_configuration() {
+    const auto path = std::filesystem::path(PIXELSTATUS_TEST_DATA_DIR)
+        / "tcp-exchange.example.json";
+    const auto loaded = pixelstatus::load_config_file(path);
+    if (!loaded) {
+        for (const auto& error : loaded.errors) {
+            std::cerr << "TCP exchange config error: " << error << '\n';
+        }
+    }
+    CHECK(loaded);
+    CHECK(loaded.config && loaded.config->monitors.size() == 1U);
+    if (!loaded.config || loaded.config->monitors.empty()) {
+        return;
+    }
+
+    const auto& monitor = loaded.config->monitors.front();
+    CHECK(monitor.id == "raw-http-banner");
+    CHECK(std::holds_alternative<pixelstatus::TcpExchangeMonitorConfig>(monitor.source));
+    const auto& exchange = std::get<pixelstatus::TcpExchangeMonitorConfig>(monitor.source);
+    CHECK(exchange.host == "127.0.0.1");
+    CHECK(exchange.port == 18080U);
+    CHECK(exchange.timeout == 2s);
+    CHECK(exchange.send.find("GET /health HTTP/1.1") == 0U);
+    CHECK(exchange.read_until == "\r\n\r\n");
+    CHECK(exchange.maximum_response_bytes == 4096U);
+    CHECK(exchange.observation == pixelstatus::TcpExchangeObservation::body);
 }
 
 pixelstatus::ApiRequest api_request(
@@ -883,6 +912,59 @@ void test_configuration_rejects_invalid_dns_monitor() {
     CHECK(errors_contain(".observe must define exactly one"));
 }
 
+void test_configuration_rejects_invalid_tcp_exchange_monitor() {
+    const auto path = std::filesystem::temp_directory_path()
+        / "pixelstatus-nx-invalid-tcp-exchange-monitor-test.json";
+    {
+        std::ofstream output(path, std::ios::binary | std::ios::trunc);
+        output << R"({
+          "schema_version": 1,
+          "display": {"width": 1, "height": 1},
+          "statuses": {
+            "ok": {"appearance": {"solid": "#00FF00"}},
+            "communication_failure": {"appearance": {"solid": "#FF00FF"}},
+            "unknown": {"appearance": {"solid": "#000000"}},
+            "stale": {"appearance": {"solid": "#FF8000"}}
+          },
+          "monitors": [
+            {
+              "id": "invalid-exchange",
+              "type": "tcp_exchange",
+              "host": "[::1]",
+              "port": 0,
+              "interval": "1s",
+              "timeout": "31s",
+              "read_until": "",
+              "maximum_response_bytes": 0,
+              "observe": {"body": true, "latency_ms": true},
+              "evaluate": [
+                {"otherwise": {"status": "ok"}}
+              ]
+            }
+          ],
+          "indicators": [
+            {"id": "one", "source": "invalid-exchange", "x": 0, "y": 0, "width": 1, "height": 1}
+          ]
+        })";
+    }
+
+    const auto loaded = pixelstatus::load_config_file(path);
+    std::error_code ignored;
+    std::filesystem::remove(path, ignored);
+    CHECK(!loaded);
+    const auto errors_contain = [&loaded](std::string_view text) {
+        return std::any_of(loaded.errors.begin(), loaded.errors.end(), [text](const auto& error) {
+            return error.find(text) != std::string::npos;
+        });
+    };
+    CHECK(errors_contain(".host must be"));
+    CHECK(errors_contain(".port must be"));
+    CHECK(errors_contain(".timeout must be between"));
+    CHECK(errors_contain(".read_until must contain"));
+    CHECK(errors_contain(".maximum_response_bytes must be"));
+    CHECK(errors_contain(".observe must define exactly one"));
+}
+
 void test_configuration_rejects_unknown_fields() {
     const auto path = std::filesystem::temp_directory_path()
         / "pixelstatus-nx-invalid-config-test.json";
@@ -1062,6 +1144,10 @@ public:
         server_.Get("/unavailable", [](const httplib::Request&, httplib::Response& response) {
             response.status = 503;
             response.set_content(R"({"status":"unavailable"})", "application/json");
+        });
+        server_.Get("/slow", [](const httplib::Request&, httplib::Response& response) {
+            std::this_thread::sleep_for(100ms);
+            response.set_content("eventually ready", "text/plain");
         });
 
         port_ = server_.bind_to_any_port("127.0.0.1");
@@ -1371,6 +1457,124 @@ void test_host_dns_monitor_runner() {
     CHECK(!pixelstatus::host::create_dns_monitor_runner(config));
 }
 
+void test_host_tcp_exchange_monitor_runner() {
+    MockHttpMonitorServer server;
+    const auto request = std::string(
+        "GET /health HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n");
+
+    pixelstatus::TcpExchangeMonitorConfig config;
+    config.host = "127.0.0.1";
+    config.port = server.port();
+    config.timeout = 1s;
+    config.send = request;
+    config.read_until = "\r\n\r\n";
+    config.maximum_response_bytes = 4096U;
+    config.observation = pixelstatus::TcpExchangeObservation::body;
+
+    auto created = pixelstatus::host::create_tcp_exchange_monitor_runner(config);
+    CHECK(created);
+    auto result = created.runner->run(std::chrono::steady_clock::now());
+    CHECK(result.transport_success);
+    CHECK(result.error == pixelstatus::MonitorError::none);
+    CHECK(std::holds_alternative<std::string>(result.value));
+    CHECK(std::get<std::string>(result.value).find("200 OK") != std::string::npos);
+    CHECK(std::get<std::string>(result.value).ends_with("\r\n\r\n"));
+    CHECK(result.detail.find("TCP exchange completed") != std::string::npos);
+
+    config.observation = pixelstatus::TcpExchangeObservation::latency_ms;
+    created = pixelstatus::host::create_tcp_exchange_monitor_runner(config);
+    CHECK(created);
+    result = created.runner->run(std::chrono::steady_clock::now());
+    CHECK(result.transport_success);
+    CHECK(std::holds_alternative<std::int64_t>(result.value));
+    CHECK(std::get<std::int64_t>(result.value) >= 0);
+
+    config.observation = pixelstatus::TcpExchangeObservation::body;
+    config.maximum_response_bytes = 8U;
+    created = pixelstatus::host::create_tcp_exchange_monitor_runner(config);
+    CHECK(created);
+    result = created.runner->run(std::chrono::steady_clock::now());
+    CHECK(!result.transport_success);
+    CHECK(result.error == pixelstatus::MonitorError::response_too_large);
+
+    config.maximum_response_bytes = 4096U;
+    config.read_until = "delimiter-that-never-arrives";
+    created = pixelstatus::host::create_tcp_exchange_monitor_runner(config);
+    CHECK(created);
+    result = created.runner->run(std::chrono::steady_clock::now());
+    CHECK(!result.transport_success);
+    CHECK(result.error == pixelstatus::MonitorError::protocol);
+
+    config.send = "GET /slow HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n";
+    config.read_until = "\r\n\r\n";
+    config.timeout = 20ms;
+    created = pixelstatus::host::create_tcp_exchange_monitor_runner(config);
+    CHECK(created);
+    result = created.runner->run(std::chrono::steady_clock::now());
+    CHECK(!result.transport_success);
+    CHECK(result.error == pixelstatus::MonitorError::timeout);
+
+    const auto example_path = std::filesystem::path(PIXELSTATUS_TEST_DATA_DIR)
+        / "tcp-exchange.example.json";
+    const auto loaded = pixelstatus::load_config_file(example_path);
+    CHECK(loaded);
+    if (!loaded.config || loaded.config->monitors.empty()) {
+        return;
+    }
+    auto pull = loaded.config->monitors.front();
+    auto exchange = std::get<pixelstatus::TcpExchangeMonitorConfig>(pull.source);
+    exchange.port = server.port();
+    pull.source = exchange;
+    created = pixelstatus::host::create_monitor_runner(pull.source);
+    CHECK(created);
+
+    pixelstatus::StateStore states;
+    pixelstatus::MonitorEngine engine(states);
+    pixelstatus::MonitorDefinition definition;
+    definition.id = pull.id;
+    definition.interval = pull.interval;
+    definition.ttl = pull.ttl;
+    definition.evaluation = pull.evaluation;
+    const auto now = std::chrono::steady_clock::now();
+    CHECK(engine.add(std::move(definition), std::move(created.runner), now));
+    const auto report = engine.run_due(now);
+    CHECK(report.executed == 1U);
+    CHECK(report.state_updates == 1U);
+    const auto state = states.resolve("raw-http-banner", std::chrono::steady_clock::now());
+    CHECK(state && state->effective_status == "ok");
+    CHECK(state && std::holds_alternative<std::string>(state->state.value));
+
+    pixelstatus::Frame frame(1U, 1U);
+    const auto render_report = pixelstatus::Renderer(now).render(
+        states,
+        *loaded.config,
+        std::chrono::steady_clock::now(),
+        frame);
+    CHECK(render_report.success);
+    CHECK((*frame.pixel(0U, 0U) == pixelstatus::Rgb{0x00, 0xC8, 0x53}));
+
+    config.host = "bad host";
+    CHECK(!pixelstatus::host::create_tcp_exchange_monitor_runner(config));
+    config.host = "127.0.0.1";
+    config.port = 0U;
+    CHECK(!pixelstatus::host::create_tcp_exchange_monitor_runner(config));
+    config.port = 80U;
+    config.timeout = 0ms;
+    CHECK(!pixelstatus::host::create_tcp_exchange_monitor_runner(config));
+    config.timeout = 1s;
+    config.send.assign(4097U, 'x');
+    CHECK(!pixelstatus::host::create_tcp_exchange_monitor_runner(config));
+    config.send.clear();
+    config.read_until.clear();
+    CHECK(!pixelstatus::host::create_tcp_exchange_monitor_runner(config));
+    config.read_until = "long delimiter";
+    config.maximum_response_bytes = 4U;
+    CHECK(!pixelstatus::host::create_tcp_exchange_monitor_runner(config));
+    config.maximum_response_bytes = 4096U;
+    config.observation = static_cast<pixelstatus::TcpExchangeObservation>(99);
+    CHECK(!pixelstatus::host::create_tcp_exchange_monitor_runner(config));
+}
+
 void test_http_display_driver() {
     pixelstatus::host::HttpDisplayOptions options;
     options.port = 0;
@@ -1478,11 +1682,13 @@ int main() {
     test_http_monitor_configuration();
     test_tcp_connect_monitor_configuration();
     test_dns_monitor_configuration();
+    test_tcp_exchange_monitor_configuration();
     test_configuration_rejects_unknown_fields();
     test_configuration_rejects_invalid_identifiers();
     test_configuration_rejects_invalid_monitor();
     test_configuration_rejects_invalid_tcp_monitor();
     test_configuration_rejects_invalid_dns_monitor();
+    test_configuration_rejects_invalid_tcp_exchange_monitor();
     test_status_api();
     test_evaluator_comparisons();
     test_monitor_engine();
@@ -1491,6 +1697,7 @@ int main() {
     test_host_http_monitor_runner();
     test_host_tcp_connect_monitor_runner();
     test_host_dns_monitor_runner();
+    test_host_tcp_exchange_monitor_runner();
     test_http_display_driver();
 #endif
 
