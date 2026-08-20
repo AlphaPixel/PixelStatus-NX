@@ -4,6 +4,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
 #include <charconv>
 #include <cmath>
 #include <cstdint>
@@ -32,6 +33,7 @@ constexpr std::size_t maximum_monitor_rules = 32U;
 constexpr std::size_t maximum_monitor_response_bytes = 64U * 1024U;
 constexpr std::size_t maximum_url_bytes = 2U * 1024U;
 constexpr std::size_t maximum_json_pointer_bytes = 512U;
+constexpr std::size_t maximum_host_bytes = 253U;
 
 void add_error(ConfigLoadResult& result, std::string message) {
     result.errors.push_back(std::move(message));
@@ -760,6 +762,18 @@ struct ParsedSteps {
     return true;
 }
 
+[[nodiscard]] bool valid_network_host(std::string_view host) {
+    if (host.empty() || host.size() > maximum_host_bytes) {
+        return false;
+    }
+    return std::none_of(host.begin(), host.end(), [](char character) {
+        const auto byte = static_cast<unsigned char>(character);
+        return byte <= 0x20U || byte == 0x7FU
+            || character == '/' || character == '?' || character == '#'
+            || character == '[' || character == ']';
+    });
+}
+
 [[nodiscard]] std::optional<HttpMonitorConfig> parse_http_monitor(
     const Json& monitor,
     std::string_view path,
@@ -834,6 +848,124 @@ struct ParsedSteps {
     return config;
 }
 
+[[nodiscard]] std::optional<TcpConnectMonitorConfig> parse_tcp_connect_monitor(
+    const Json& monitor,
+    std::string_view path,
+    ConfigLoadResult& result) {
+    const auto host = required_string(monitor, "host", path, result);
+    const auto host_valid = host && valid_network_host(*host);
+    if (host && !host_valid) {
+        add_error(
+            result,
+            std::string(path)
+                + ".host must be a hostname or unbracketed IP address of at most 253 bytes");
+    }
+    const auto port = bounded_size(monitor, "port", path, 1U, 65'535U, result);
+
+    TcpConnectMonitorConfig config;
+    if (host) {
+        config.host = *host;
+    }
+    if (port) {
+        config.port = static_cast<std::uint16_t>(*port);
+    }
+    if (const auto field = monitor.find("timeout"); field != monitor.end()) {
+        const auto timeout = bounded_duration_value(
+            *field,
+            std::string(path) + ".timeout",
+            Duration{1},
+            maximum_monitor_timeout,
+            result);
+        if (timeout) {
+            config.timeout = *timeout;
+        } else {
+            return std::nullopt;
+        }
+    }
+    if (!host_valid || !port) {
+        return std::nullopt;
+    }
+    return config;
+}
+
+[[nodiscard]] std::optional<DnsMonitorConfig> parse_dns_monitor(
+    const Json& monitor,
+    std::string_view path,
+    ConfigLoadResult& result) {
+    const auto host = required_string(monitor, "host", path, result);
+    const auto host_valid = host && valid_network_host(*host);
+    if (host && !host_valid) {
+        add_error(
+            result,
+            std::string(path)
+                + ".host must be a hostname or unbracketed IP address of at most 253 bytes");
+    }
+
+    DnsMonitorConfig config;
+    if (host) {
+        config.host = *host;
+    }
+    bool family_valid = true;
+    if (const auto field = monitor.find("family"); field != monitor.end()) {
+        if (!field->is_string()) {
+            add_error(result, std::string(path) + ".family must be any, ipv4, or ipv6");
+            family_valid = false;
+        } else {
+            const auto family = field->get_ref<const std::string&>();
+            if (family == "any") {
+                config.family = DnsAddressFamily::any;
+            } else if (family == "ipv4") {
+                config.family = DnsAddressFamily::ipv4;
+            } else if (family == "ipv6") {
+                config.family = DnsAddressFamily::ipv6;
+            } else {
+                add_error(result, std::string(path) + ".family must be any, ipv4, or ipv6");
+                family_valid = false;
+            }
+        }
+    }
+    bool timeout_valid = true;
+    if (const auto field = monitor.find("timeout"); field != monitor.end()) {
+        const auto timeout = bounded_duration_value(
+            *field,
+            std::string(path) + ".timeout",
+            Duration{1},
+            maximum_monitor_timeout,
+            result);
+        if (timeout) {
+            config.timeout = *timeout;
+        } else {
+            timeout_valid = false;
+        }
+    }
+
+    const auto observe = monitor.find("observe");
+    bool observation_valid = true;
+    if (observe == monitor.end() || !observe->is_object() || observe->size() != 1U) {
+        add_error(result, std::string(path) + ".observe must define exactly one observation");
+        observation_valid = false;
+    } else {
+        const auto observation = observe->begin();
+        if (!observation.value().is_boolean() || !observation.value().get<bool>()) {
+            add_error(result, std::string(path) + ".observe values must be true");
+            observation_valid = false;
+        } else if (observation.key() == "addresses") {
+            config.observation = DnsObservation::addresses;
+        } else if (observation.key() == "address_count") {
+            config.observation = DnsObservation::address_count;
+        } else if (observation.key() == "latency_ms") {
+            config.observation = DnsObservation::latency_ms;
+        } else {
+            add_error(result, std::string(path) + ".observe contains an unknown observation");
+            observation_valid = false;
+        }
+    }
+    if (!host_valid || !family_valid || !timeout_valid || !observation_valid) {
+        return std::nullopt;
+    }
+    return config;
+}
+
 [[nodiscard]] std::optional<PullMonitorConfig> parse_pull_monitor(
     const Json& monitor,
     std::string_view path,
@@ -843,20 +975,49 @@ struct ParsedSteps {
         add_error(result, std::string(path) + " must be an object");
         return std::nullopt;
     }
-    reject_unknown_fields(
-        monitor,
-        {
-            "id", "type", "url", "interval", "ttl", "timeout",
-            "maximum_response_bytes", "observe", "evaluate",
-            "transport_failure_status", "no_match_status",
-        },
-        path,
-        result);
-
     const auto id = required_identifier(monitor, "id", path, result);
     const auto type = required_string(monitor, "type", path, result);
-    if (type && *type != "http") {
-        add_error(result, std::string(path) + ".type must currently be http");
+    if (type && *type == "http") {
+        reject_unknown_fields(
+            monitor,
+            {
+                "id", "type", "url", "interval", "ttl", "timeout",
+                "maximum_response_bytes", "observe", "evaluate",
+                "transport_failure_status", "no_match_status",
+            },
+            path,
+            result);
+    } else if (type && *type == "tcp_connect") {
+        reject_unknown_fields(
+            monitor,
+            {
+                "id", "type", "host", "port", "interval", "ttl", "timeout",
+                "evaluate", "transport_failure_status", "no_match_status",
+            },
+            path,
+            result);
+    } else if (type && *type == "dns") {
+        reject_unknown_fields(
+            monitor,
+            {
+                "id", "type", "host", "family", "interval", "ttl", "timeout",
+                "observe", "evaluate", "transport_failure_status", "no_match_status",
+            },
+            path,
+            result);
+    } else {
+        reject_unknown_fields(
+            monitor,
+            {
+                "id", "type", "url", "host", "port", "family", "interval", "ttl",
+                "timeout", "maximum_response_bytes", "observe", "evaluate",
+                "transport_failure_status", "no_match_status",
+            },
+            path,
+            result);
+        if (type) {
+            add_error(result, std::string(path) + ".type must be http, tcp_connect, or dns");
+        }
     }
     const auto interval_field = monitor.find("interval");
     if (interval_field == monitor.end()) {
@@ -879,9 +1040,21 @@ struct ParsedSteps {
         ttl_valid = ttl.has_value();
     }
     const auto evaluation = parse_evaluation_policy(monitor, path, statuses, result);
-    const auto http = parse_http_monitor(monitor, path, result);
-    if (!id || !type || *type != "http" || !interval || !ttl_valid
-        || !evaluation || !http) {
+    std::optional<MonitorSourceConfig> source;
+    if (type && *type == "http") {
+        if (const auto http = parse_http_monitor(monitor, path, result)) {
+            source = *http;
+        }
+    } else if (type && *type == "tcp_connect") {
+        if (const auto tcp = parse_tcp_connect_monitor(monitor, path, result)) {
+            source = *tcp;
+        }
+    } else if (type && *type == "dns") {
+        if (const auto dns = parse_dns_monitor(monitor, path, result)) {
+            source = *dns;
+        }
+    }
+    if (!id || !type || !interval || !ttl_valid || !evaluation || !source) {
         return std::nullopt;
     }
 
@@ -890,7 +1063,7 @@ struct ParsedSteps {
     config.interval = *interval;
     config.ttl = ttl;
     config.evaluation = *evaluation;
-    config.source = *http;
+    config.source = std::move(*source);
     return config;
 }
 

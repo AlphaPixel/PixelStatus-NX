@@ -1,0 +1,74 @@
+{
+  "schema_version": 1,
+  "display": {
+    "width": 1,
+    "height": 1,
+    "background": "#000000"
+  },
+  "statuses": {
+    "ok": {
+      "appearance": {
+        "solid": "#00C853"
+      }
+    },
+    "warn": {
+      "appearance": {
+        "solid": "#FFD600"
+      }
+    },
+    "communication_failure": {
+      "appearance": {
+        "solid": "#FF00FF"
+      }
+    },
+    "stale": {
+      "appearance": {
+        "solid": "#FF9100"
+      }
+    },
+    "unknown": {
+      "appearance": {
+        "solid": "#6200EA"
+      }
+    }
+  },
+  "monitors": [
+    {
+      "id": "localhost-dns",
+      "type": "dns",
+      "host": "localhost",
+      "family": "ipv4",
+      "interval": "10s",
+      "ttl": "30s",
+      "timeout": "1s",
+      "observe": {
+        "addresses": true
+      },
+      "evaluate": [
+        {
+          "when": {
+            "value": {
+              "contains": "127.0.0.1"
+            }
+          },
+          "status": "ok"
+        },
+        {
+          "otherwise": {
+            "status": "warn"
+          }
+        }
+      ]
+    }
+  ],
+  "indicators": [
+    {
+      "id": "localhost-dns-indicator",
+      "source": "localhost-dns",
+      "x": 0,
+      "y": 0,
+      "width": 1,
+      "height": 1
+    }
+  ]
+}

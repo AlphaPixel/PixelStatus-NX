@@ -102,11 +102,23 @@ Animation time normally starts when an indicator enters its effective status. TT
 expiration enters `stale` at the expiry instant and starts the stale appearance at
 that point.
 
-## HTTP Pull Monitors
+## Pull Monitors
 
-`monitors` is optional and currently supports the portable `http` monitor shape.
-The desktop adapter performs GET requests; method selection, request bodies, custom
-headers, credentials, and TLS are later increments.
+`monitors` is optional and currently supports `http`, `tcp_connect`, and `dns`.
+All use the same interval, optional TTL, timeout, transport-failure status, no-match
+status, and ordered evaluation rules.
+
+Intervals are limited to 1 second through 24 hours, TTL to seven days, and timeout
+to 30 seconds. Evaluation rules are ordered and the first match wins. Supported
+value comparisons are `exists`, `not_exists`, `equals`, `not_equals`, `contains`,
+`not_contains`, `greater_than`, `greater_or_equal`, `less_than`, `less_or_equal`,
+and inclusive `between`. Every referenced status must exist in the top-level
+`statuses` map.
+
+### HTTP
+
+The desktop HTTP adapter performs GET requests; method selection, request bodies,
+custom headers, credentials, and TLS are later increments.
 
 ```json
 {
@@ -138,9 +150,8 @@ headers, credentials, and TLS are later increments.
 }
 ```
 
-Intervals are limited to 1 second through 24 hours, TTL to seven days, and timeout
-to 30 seconds. Response bodies default to 4 KiB and cannot exceed a configured
-64 KiB limit. URLs cannot contain embedded credentials or fragments.
+Response bodies default to 4 KiB and cannot exceed a configured 64 KiB limit. URLs
+cannot contain embedded credentials or fragments.
 
 Exactly one observation is selected:
 
@@ -156,13 +167,99 @@ DNS, connection, timeout, or protocol failure. Invalid JSON and selected arrays 
 objects are `invalid_response` transport failures. A missing JSON Pointer produces
 a successful null observation so `exists` and `not_exists` rules can classify it.
 
-Evaluation rules are ordered and the first match wins. Supported value comparisons
-are `exists`, `not_exists`, `equals`, `not_equals`, `contains`, `not_contains`,
-`greater_than`, `greater_or_equal`, `less_than`, `less_or_equal`, and inclusive
-`between`. Every referenced status must exist in the top-level `statuses` map.
-
 The complete runnable shape is in
 [`http-monitor.example.json`](../examples/http-monitor.example.json).
+
+### TCP Connect
+
+The `tcp_connect` monitor resolves a hostname or unbracketed IP address and attempts
+to establish a TCP connection within the configured timeout. A successful check
+observes the elapsed connection latency as an integer number of milliseconds, so
+rules can classify a reachable but slow endpoint separately from an unavailable
+one.
+
+```json
+{
+  "id": "database-port",
+  "type": "tcp_connect",
+  "host": "127.0.0.1",
+  "port": 5432,
+  "interval": "10s",
+  "ttl": "30s",
+  "timeout": "1s",
+  "evaluate": [
+    {
+      "when": {
+        "value": {
+          "greater_or_equal": 500
+        }
+      },
+      "status": "warn"
+    },
+    {
+      "otherwise": {
+        "status": "ok"
+      }
+    }
+  ]
+}
+```
+
+Name-resolution failures, connection failures, and timeouts are normalized through
+the common transport-failure status. A TCP connect check does not transmit or read
+application data. The complete runnable shape is in
+[`tcp-connect.example.json`](../examples/tcp-connect.example.json).
+
+### DNS
+
+The `dns` monitor performs address resolution with an optional `family` of `any`,
+`ipv4`, or `ipv6`. It can expose the sorted, unique, comma-separated address list,
+the unique address count, or lookup latency in integer milliseconds.
+
+```json
+{
+  "id": "internal-dns",
+  "type": "dns",
+  "host": "internal.example.com",
+  "family": "ipv4",
+  "interval": "30s",
+  "ttl": "2m",
+  "timeout": "2s",
+  "observe": {
+    "addresses": true
+  },
+  "evaluate": [
+    {
+      "when": {
+        "value": {
+          "contains": "192.168.10.20"
+        }
+      },
+      "status": "ok"
+    },
+    {
+      "otherwise": {
+        "status": "warn"
+      }
+    }
+  ]
+}
+```
+
+Exactly one DNS observation is selected:
+
+```json
+{"addresses": true}
+{"address_count": true}
+{"latency_ms": true}
+```
+
+The timeout is measured from before the resolver call, and a result arriving after
+the deadline is classified as a timeout. The host operating system resolver is
+blocking, however, so the current desktop runner cannot interrupt it while it is in
+progress. Other monitor workers and both display backends remain responsive.
+The complete runnable shape is in
+[`dns-monitor.example.json`](../examples/dns-monitor.example.json).
 
 ## Host Status Input
 

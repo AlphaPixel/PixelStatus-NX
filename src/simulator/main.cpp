@@ -4,8 +4,8 @@
 #include "pixelstatus/config.hpp"
 #include "pixelstatus/frame.hpp"
 #include "pixelstatus/host/http_display_driver.hpp"
-#include "pixelstatus/host/http_monitor_runner.hpp"
 #include "pixelstatus/host/monitor_executor.hpp"
+#include "pixelstatus/host/monitor_runner_factory.hpp"
 #include "pixelstatus/monitor_engine.hpp"
 #include "pixelstatus/renderer.hpp"
 #include "pixelstatus/state.hpp"
@@ -282,8 +282,7 @@ int main(int argc, char** argv) {
 
     pixelstatus::MonitorEngine monitor_engine(states);
     for (const auto& configured : config.monitors) {
-        auto created = pixelstatus::host::create_http_monitor_runner(
-            std::get<pixelstatus::HttpMonitorConfig>(configured.source));
+        auto created = pixelstatus::host::create_monitor_runner(configured.source);
         if (!created) {
             std::cerr << "Unable to create monitor " << configured.id
                       << ": " << created.error << '\n';

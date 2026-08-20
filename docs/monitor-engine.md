@@ -87,9 +87,9 @@ shutdown can wait up to that monitor's configured timeout. The future FreeRTOS
 executor can reuse the same claim/evaluate/publish contract while providing its own
 task and cancellation mechanisms.
 
-## Desktop HTTP Adapter
+## Desktop Network Adapters
 
-The first concrete runner performs bounded HTTP GET requests and can observe the
+The HTTP runner performs bounded GET requests and can observe the
 response status code, complete body, or a scalar selected by RFC 6901 JSON Pointer.
 It enforces connection/read/write/overall timeouts, disables redirects, rejects URL
 credentials, and streams response data through an explicit byte limit.
@@ -99,9 +99,23 @@ For example, HTTP 503 can be evaluated as an integer observation, while an inval
 JSON document selected by a JSON monitor becomes `invalid_response` and maps through
 the transport-failure status.
 
+The TCP-connect runner resolves a configured hostname or IP address and performs a
+non-blocking connection attempt against each returned address within one shared
+deadline. Success observes connection latency in integer milliseconds. Resolution,
+connection, and timeout errors use the same normalized `MonitorError` contract as
+HTTP, so neither the evaluator nor scheduler depends on the transport type.
+The shared deadline begins before resolution, but the operating system's blocking
+resolver call cannot itself be cancelled by the current host executor.
+
+The standalone DNS runner uses the same resolver boundary with explicit IPv4,
+IPv6, or combined selection. It normalizes results into a sorted unique address
+list and can observe that list, its address count, or lookup latency. A result that
+returns after its configured deadline is classified as a timeout; the blocking host
+resolver call itself remains non-cancellable.
+
 ## Deliberately Deferred
 
-HTTPS, custom request methods/headers/bodies, DNS/TCP-specific runners, jitter, cron
-scheduling, and in-flight request cancellation remain deferred. HTTPS URLs are
-valid portable configuration, but the current desktop factory rejects them at
-startup because this build deliberately does not link a TLS library.
+HTTPS, custom request methods/headers/bodies, DNS record-type queries, TCP exchanges,
+jitter, cron scheduling, and in-flight request cancellation remain deferred. HTTPS
+URLs are valid portable configuration, but the current desktop factory rejects them
+at startup because this build deliberately does not link a TLS library.

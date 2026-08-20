@@ -36,7 +36,7 @@
       "type": "array",
       "maxItems": 256,
       "items": {
-        "$ref": "#/$defs/httpMonitor"
+        "$ref": "#/$defs/monitor"
       }
     },
     "indicators": {
@@ -240,6 +240,13 @@
         }
       ]
     },
+    "monitor": {
+      "oneOf": [
+        {"$ref": "#/$defs/httpMonitor"},
+        {"$ref": "#/$defs/tcpConnectMonitor"},
+        {"$ref": "#/$defs/dnsMonitor"}
+      ]
+    },
     "httpMonitor": {
       "type": "object",
       "additionalProperties": false,
@@ -269,6 +276,104 @@
           "default": 4096
         },
         "observe": {"$ref": "#/$defs/httpObservation"},
+        "transport_failure_status": {"$ref": "#/$defs/identifier"},
+        "no_match_status": {"$ref": "#/$defs/identifier"},
+        "evaluate": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 32,
+          "items": {"$ref": "#/$defs/evaluationRule"}
+        }
+      }
+    },
+    "tcpConnectMonitor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "type",
+        "host",
+        "port",
+        "interval",
+        "evaluate"
+      ],
+      "properties": {
+        "id": {"$ref": "#/$defs/identifier"},
+        "type": {"const": "tcp_connect"},
+        "host": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 253,
+          "pattern": "^[^\\s/?#\\[\\]]+$"
+        },
+        "port": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        },
+        "interval": {"$ref": "#/$defs/positiveDuration"},
+        "ttl": {"$ref": "#/$defs/positiveDuration"},
+        "timeout": {"$ref": "#/$defs/positiveDuration"},
+        "transport_failure_status": {"$ref": "#/$defs/identifier"},
+        "no_match_status": {"$ref": "#/$defs/identifier"},
+        "evaluate": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 32,
+          "items": {"$ref": "#/$defs/evaluationRule"}
+        }
+      }
+    },
+    "dnsMonitor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "type",
+        "host",
+        "interval",
+        "observe",
+        "evaluate"
+      ],
+      "properties": {
+        "id": {"$ref": "#/$defs/identifier"},
+        "type": {"const": "dns"},
+        "host": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 253,
+          "pattern": "^[^\\s/?#\\[\\]]+$"
+        },
+        "family": {
+          "type": "string",
+          "enum": ["any", "ipv4", "ipv6"],
+          "default": "any"
+        },
+        "interval": {"$ref": "#/$defs/positiveDuration"},
+        "ttl": {"$ref": "#/$defs/positiveDuration"},
+        "timeout": {"$ref": "#/$defs/positiveDuration"},
+        "observe": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["addresses"],
+              "properties": {"addresses": {"const": true}}
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["address_count"],
+              "properties": {"address_count": {"const": true}}
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["latency_ms"],
+              "properties": {"latency_ms": {"const": true}}
+            }
+          ]
+        },
         "transport_failure_status": {"$ref": "#/$defs/identifier"},
         "no_match_status": {"$ref": "#/$defs/identifier"},
         "evaluate": {

@@ -5,6 +5,7 @@
 #include "pixelstatus/evaluator.hpp"
 
 #include <cstddef>
+#include <cstdint>
 #include <filesystem>
 #include <optional>
 #include <string>
@@ -43,7 +44,35 @@ struct HttpMonitorConfig {
     std::string json_pointer;
 };
 
-using MonitorSourceConfig = std::variant<HttpMonitorConfig>;
+struct TcpConnectMonitorConfig {
+    std::string host;
+    std::uint16_t port{};
+    Duration timeout{std::chrono::seconds(2)};
+};
+
+enum class DnsAddressFamily {
+    any,
+    ipv4,
+    ipv6,
+};
+
+enum class DnsObservation {
+    addresses,
+    address_count,
+    latency_ms,
+};
+
+struct DnsMonitorConfig {
+    std::string host;
+    DnsAddressFamily family{DnsAddressFamily::any};
+    DnsObservation observation{DnsObservation::addresses};
+    Duration timeout{std::chrono::seconds(2)};
+};
+
+using MonitorSourceConfig = std::variant<
+    HttpMonitorConfig,
+    TcpConnectMonitorConfig,
+    DnsMonitorConfig>;
 
 struct PullMonitorConfig {
     std::string id;

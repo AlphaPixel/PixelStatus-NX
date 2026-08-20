@@ -5,7 +5,7 @@
 
 namespace pixelstatus::host {
 
-[[nodiscard]] MonitorRunnerCreationResult create_http_monitor_runner(
-    HttpMonitorConfig config);
+[[nodiscard]] MonitorRunnerCreationResult create_dns_monitor_runner(
+    DnsMonitorConfig config);
 
 }  // namespace pixelstatus::host

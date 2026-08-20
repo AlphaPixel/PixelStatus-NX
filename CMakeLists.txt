@@ -64,22 +64,28 @@ if(PIXELSTATUS_BUILD_HOST_HTTP OR PIXELSTATUS_BUILD_SIMULATOR)
 endif()
 
 if(PIXELSTATUS_BUILD_HOST_HTTP)
-    add_library(pixelstatus_host_http
+    add_library(pixelstatus_host
+        src/host/dns_monitor_runner.cpp
         src/host/http_display_driver.cpp
         src/host/http_monitor_runner.cpp
         src/host/monitor_executor.cpp
+        src/host/monitor_runner_factory.cpp
+        src/host/tcp_connect_monitor_runner.cpp
     )
-    target_include_directories(pixelstatus_host_http PUBLIC include)
-    target_link_libraries(pixelstatus_host_http PRIVATE
+    target_include_directories(pixelstatus_host PUBLIC include)
+    target_link_libraries(pixelstatus_host PRIVATE
         pixelstatus_core
         httplib::httplib
         nlohmann_json::nlohmann_json
     )
+    if(WIN32)
+        target_link_libraries(pixelstatus_host PRIVATE ws2_32)
+    endif()
 
     if(MSVC)
-        target_compile_options(pixelstatus_host_http PRIVATE /W4 /permissive-)
+        target_compile_options(pixelstatus_host PRIVATE /W4 /permissive-)
     else()
-        target_compile_options(pixelstatus_host_http PRIVATE -Wall -Wextra -Wpedantic)
+        target_compile_options(pixelstatus_host PRIVATE -Wall -Wextra -Wpedantic)
     endif()
 endif()
 
@@ -99,7 +105,7 @@ if(PIXELSTATUS_BUILD_SIMULATOR)
     target_include_directories(pixelstatus_simulator PRIVATE src/simulator)
     target_link_libraries(pixelstatus_simulator PRIVATE
         pixelstatus_core
-        pixelstatus_host_http
+        pixelstatus_host
         httplib::httplib
         user32
         gdi32
@@ -125,6 +131,12 @@ if(PIXELSTATUS_BUILD_SIMULATOR)
             ${CMAKE_CURRENT_SOURCE_DIR}/examples/concurrent-monitors.example.json
             $<TARGET_FILE_DIR:pixelstatus_simulator>/concurrent-monitors.example.json
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            ${CMAKE_CURRENT_SOURCE_DIR}/examples/tcp-connect.example.json
+            $<TARGET_FILE_DIR:pixelstatus_simulator>/tcp-connect.example.json
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            ${CMAKE_CURRENT_SOURCE_DIR}/examples/dns-monitor.example.json
+            $<TARGET_FILE_DIR:pixelstatus_simulator>/dns-monitor.example.json
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
             ${CMAKE_CURRENT_SOURCE_DIR}/THIRD_PARTY_NOTICES.md
             $<TARGET_FILE_DIR:pixelstatus_simulator>/THIRD_PARTY_NOTICES.md
         VERBATIM
@@ -141,7 +153,7 @@ if(PIXELSTATUS_BUILD_TESTS)
     )
     if(PIXELSTATUS_BUILD_HOST_HTTP)
         target_link_libraries(pixelstatus_tests PRIVATE
-            pixelstatus_host_http
+            pixelstatus_host
             httplib::httplib
             nlohmann_json::nlohmann_json
         )

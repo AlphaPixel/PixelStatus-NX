@@ -17,8 +17,8 @@ cmake --build --preset windows-debug
 ctest --preset windows-debug
 ```
 
-To compile and test only the portable core without the desktop HTTP adapter or
-Win32 simulator, use the companion preset:
+To compile and test only the portable core without the desktop network/display
+adapters or Win32 simulator, use the companion preset:
 
 ```powershell
 cmake --preset windows-core-debug
@@ -45,15 +45,17 @@ adds these shared entries to the **Startup Item** dropdown:
 | `Simulator - Native Only (Push API)` | Win32 output without the browser server | Status API `18807` |
 | `Simulator - HTTP Monitor (Native + Browser)` | HTTP/JSON monitor example with both outputs | Status API `18817`, browser `18818` |
 | `Simulator - Concurrent HTTP Monitors` | Headless two-monitor slow/fast concurrency example | Status API `18837`, browser `18838` |
+| `Simulator - TCP Connect Monitor` | Headless TCP-connect latency example | Status API `18847`, browser `18848` |
+| `Simulator - DNS Monitor` | Headless localhost IPv4 resolution example | Status API `18857`, browser `18858` |
 | `Simulator - Timed Browser Smoke (10 seconds)` | Headless, API-disabled, 60 FPS browser exercise that exits automatically | Browser `18828` |
 | `Tests - Active CMake Preset` | Runs `pixelstatus_tests` under the debugger | None |
 
 The simulator entries require the `windows-debug` preset because the core-only
 preset does not build that executable. The tests entry follows the active preset:
 use `windows-debug` for the complete host suite or `windows-core-debug` for the
-portable suite without host HTTP code.
+portable suite without host adapter code.
 
-Before starting either HTTP-monitor profile, run its local upstream fixture in a
+Before starting any HTTP- or TCP-monitor profile, run its local upstream fixture in a
 separate terminal:
 
 ```powershell
@@ -98,7 +100,21 @@ browser display remain responsive:
 .\tools\test-monitor-concurrency.ps1
 ```
 
-Python is used only for the mock upstream endpoint; the monitor implementation and
+The TCP-connect smoke test verifies configuration, connection latency observation,
+state publication, and the generic runner factory against the same local fixture:
+
+```powershell
+.\tools\test-tcp-monitor.ps1
+```
+
+The DNS smoke test verifies address-family selection, resolution, evaluation, and
+state publication without requiring an external fixture:
+
+```powershell
+.\tools\test-dns-monitor.ps1
+```
+
+Python is used only for the mock upstream fixture; the monitor implementations and
 all application behavior under test are C++20.
 
 CMake downloads the pinned `nlohmann/json` 3.12.0 and `cpp-httplib` 0.51.0
@@ -191,9 +207,9 @@ See [Configuration V1](configuration-v1.md) for the status and appearance model.
 
 The core library contains host-tested runner, evaluator, and deterministic
 interval-engine contracts. Scripted runners exercise time and failure edge cases;
-an in-process loopback server tests the concrete HTTP/JSON adapter through state
-publication, TTL, and rendering. See [Host Monitor Engine](monitor-engine.md) for
-comparison and scheduling semantics.
+in-process loopback tests exercise the concrete HTTP/JSON, TCP-connect, and DNS
+adapters through state publication, TTL, and rendering. See
+[Host Monitor Engine](monitor-engine.md) for comparison and scheduling semantics.
 
 The simulator automatically registers an optional `monitors` array from its JSON
 configuration and executes those monitors with a bounded background worker pool.
@@ -201,7 +217,10 @@ Each configured monitor can have only one request in flight at a time. See
 [`http-monitor.example.json`](../examples/http-monitor.example.json) for a complete
 single-monitor configuration and
 [`concurrent-monitors.example.json`](../examples/concurrent-monitors.example.json)
-for the deterministic slow/fast fixture.
+for the deterministic slow/fast fixture. The second supported transport is shown in
+[`tcp-connect.example.json`](../examples/tcp-connect.example.json), and standalone
+address resolution is shown in
+[`dns-monitor.example.json`](../examples/dns-monitor.example.json).
 
 The simulator supports:
 
@@ -235,5 +254,6 @@ scheduling.
 The host build does not include ESP-IDF, a cross-compiler, NimBLE transport, Wi-Fi,
 NVS, LittleFS, GPIO, or OTA support. MI packet construction is host-tested, but actual
 BLE behavior remains a hardware validation task. HTTPS and additional pull
-transports remain deferred; HTTP GET, scalar JSON extraction, evaluation, and
-interval execution are implemented and host-tested.
+transports remain deferred; HTTP GET, scalar JSON extraction, TCP connect, DNS
+address resolution, evaluation, concurrent interval execution, and display
+responsiveness are implemented and host-tested.

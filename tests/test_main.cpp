@@ -9,9 +9,12 @@
 #include "pixelstatus/status_api.hpp"
 
 #ifdef PIXELSTATUS_TEST_HOST_HTTP
+#include "pixelstatus/host/dns_monitor_runner.hpp"
 #include "pixelstatus/host/http_display_driver.hpp"
 #include "pixelstatus/host/http_monitor_runner.hpp"
 #include "pixelstatus/host/monitor_executor.hpp"
+#include "pixelstatus/host/monitor_runner_factory.hpp"
+#include "pixelstatus/host/tcp_connect_monitor_runner.hpp"
 
 #include <httplib.h>
 #include <nlohmann/json.hpp>
@@ -266,6 +269,61 @@ void test_http_monitor_configuration() {
     CHECK(http.maximum_response_bytes == 4096U);
     CHECK(http.observation == pixelstatus::HttpObservation::json_pointer);
     CHECK(http.json_pointer == "/database/replication_lag");
+}
+
+void test_tcp_connect_monitor_configuration() {
+    const auto path = std::filesystem::path(PIXELSTATUS_TEST_DATA_DIR)
+        / "tcp-connect.example.json";
+    const auto loaded = pixelstatus::load_config_file(path);
+    if (!loaded) {
+        for (const auto& error : loaded.errors) {
+            std::cerr << "TCP monitor config error: " << error << '\n';
+        }
+    }
+    CHECK(loaded);
+    CHECK(loaded.config && loaded.config->monitors.size() == 1U);
+    if (!loaded.config || loaded.config->monitors.empty()) {
+        return;
+    }
+
+    const auto& monitor = loaded.config->monitors.front();
+    CHECK(monitor.id == "tcp-health");
+    CHECK(monitor.interval == 10s);
+    CHECK(monitor.ttl == 30s);
+    CHECK(monitor.evaluation.rules.size() == 2U);
+    CHECK(std::holds_alternative<pixelstatus::TcpConnectMonitorConfig>(monitor.source));
+    const auto& tcp = std::get<pixelstatus::TcpConnectMonitorConfig>(monitor.source);
+    CHECK(tcp.host == "127.0.0.1");
+    CHECK(tcp.port == 18080U);
+    CHECK(tcp.timeout == 1s);
+}
+
+void test_dns_monitor_configuration() {
+    const auto path = std::filesystem::path(PIXELSTATUS_TEST_DATA_DIR)
+        / "dns-monitor.example.json";
+    const auto loaded = pixelstatus::load_config_file(path);
+    if (!loaded) {
+        for (const auto& error : loaded.errors) {
+            std::cerr << "DNS monitor config error: " << error << '\n';
+        }
+    }
+    CHECK(loaded);
+    CHECK(loaded.config && loaded.config->monitors.size() == 1U);
+    if (!loaded.config || loaded.config->monitors.empty()) {
+        return;
+    }
+
+    const auto& monitor = loaded.config->monitors.front();
+    CHECK(monitor.id == "localhost-dns");
+    CHECK(monitor.interval == 10s);
+    CHECK(monitor.ttl == 30s);
+    CHECK(monitor.evaluation.rules.size() == 2U);
+    CHECK(std::holds_alternative<pixelstatus::DnsMonitorConfig>(monitor.source));
+    const auto& dns = std::get<pixelstatus::DnsMonitorConfig>(monitor.source);
+    CHECK(dns.host == "localhost");
+    CHECK(dns.family == pixelstatus::DnsAddressFamily::ipv4);
+    CHECK(dns.observation == pixelstatus::DnsObservation::addresses);
+    CHECK(dns.timeout == 1s);
 }
 
 pixelstatus::ApiRequest api_request(
@@ -725,6 +783,106 @@ void test_configuration_rejects_invalid_monitor() {
     CHECK(errors_contain("undefined status"));
 }
 
+void test_configuration_rejects_invalid_tcp_monitor() {
+    const auto path = std::filesystem::temp_directory_path()
+        / "pixelstatus-nx-invalid-tcp-monitor-test.json";
+    {
+        std::ofstream output(path, std::ios::binary | std::ios::trunc);
+        output << R"({
+          "schema_version": 1,
+          "display": {"width": 1, "height": 1},
+          "statuses": {
+            "ok": {"appearance": {"solid": "#00FF00"}},
+            "communication_failure": {"appearance": {"solid": "#FF00FF"}},
+            "unknown": {"appearance": {"solid": "#000000"}},
+            "stale": {"appearance": {"solid": "#FF8000"}}
+          },
+          "monitors": [
+            {
+              "id": "invalid-tcp",
+              "type": "tcp_connect",
+              "host": "[::1]",
+              "port": 0,
+              "interval": "1s",
+              "timeout": "31s",
+              "observe": {"status_code": true},
+              "evaluate": [
+                {"otherwise": {"status": "ok"}}
+              ]
+            }
+          ],
+          "indicators": [
+            {"id": "one", "source": "invalid-tcp", "x": 0, "y": 0, "width": 1, "height": 1}
+          ]
+        })";
+    }
+
+    const auto loaded = pixelstatus::load_config_file(path);
+    std::error_code ignored;
+    std::filesystem::remove(path, ignored);
+    CHECK(!loaded);
+    const auto errors_contain = [&loaded](std::string_view text) {
+        return std::any_of(loaded.errors.begin(), loaded.errors.end(), [text](const auto& error) {
+            return error.find(text) != std::string::npos;
+        });
+    };
+    CHECK(errors_contain("unknown field: observe"));
+    CHECK(errors_contain(".host must be"));
+    CHECK(errors_contain(".port must be"));
+    CHECK(errors_contain(".timeout must be between"));
+}
+
+void test_configuration_rejects_invalid_dns_monitor() {
+    const auto path = std::filesystem::temp_directory_path()
+        / "pixelstatus-nx-invalid-dns-monitor-test.json";
+    {
+        std::ofstream output(path, std::ios::binary | std::ios::trunc);
+        output << R"({
+          "schema_version": 1,
+          "display": {"width": 1, "height": 1},
+          "statuses": {
+            "ok": {"appearance": {"solid": "#00FF00"}},
+            "communication_failure": {"appearance": {"solid": "#FF00FF"}},
+            "unknown": {"appearance": {"solid": "#000000"}},
+            "stale": {"appearance": {"solid": "#FF8000"}}
+          },
+          "monitors": [
+            {
+              "id": "invalid-dns",
+              "type": "dns",
+              "host": "[::1]",
+              "family": "ipx",
+              "port": 53,
+              "interval": "1s",
+              "timeout": "31s",
+              "observe": {"addresses": true, "latency_ms": true},
+              "evaluate": [
+                {"otherwise": {"status": "ok"}}
+              ]
+            }
+          ],
+          "indicators": [
+            {"id": "one", "source": "invalid-dns", "x": 0, "y": 0, "width": 1, "height": 1}
+          ]
+        })";
+    }
+
+    const auto loaded = pixelstatus::load_config_file(path);
+    std::error_code ignored;
+    std::filesystem::remove(path, ignored);
+    CHECK(!loaded);
+    const auto errors_contain = [&loaded](std::string_view text) {
+        return std::any_of(loaded.errors.begin(), loaded.errors.end(), [text](const auto& error) {
+            return error.find(text) != std::string::npos;
+        });
+    };
+    CHECK(errors_contain("unknown field: port"));
+    CHECK(errors_contain(".host must be"));
+    CHECK(errors_contain(".family must be"));
+    CHECK(errors_contain(".timeout must be between"));
+    CHECK(errors_contain(".observe must define exactly one"));
+}
+
 void test_configuration_rejects_unknown_fields() {
     const auto path = std::filesystem::temp_directory_path()
         / "pixelstatus-nx-invalid-config-test.json";
@@ -939,6 +1097,10 @@ public:
         return "http://127.0.0.1:" + std::to_string(port_) + std::string(target);
     }
 
+    [[nodiscard]] std::uint16_t port() const {
+        return static_cast<std::uint16_t>(port_);
+    }
+
 private:
     httplib::Server server_;
     int port_{};
@@ -1047,6 +1209,168 @@ void test_host_http_monitor_runner() {
     CHECK((*frame.pixel(0, 0) == pixelstatus::Rgb{0x00, 0xC8, 0x53}));
 }
 
+void test_host_tcp_connect_monitor_runner() {
+    std::uint16_t closed_port{};
+    {
+        MockHttpMonitorServer server;
+        closed_port = server.port();
+
+        pixelstatus::TcpConnectMonitorConfig config;
+        config.host = "127.0.0.1";
+        config.port = server.port();
+        config.timeout = 1s;
+        auto created = pixelstatus::host::create_tcp_connect_monitor_runner(config);
+        CHECK(created);
+        auto result = created.runner->run(std::chrono::steady_clock::now());
+        CHECK(result.transport_success);
+        CHECK(result.error == pixelstatus::MonitorError::none);
+        CHECK(std::holds_alternative<std::int64_t>(result.value));
+        CHECK(std::get<std::int64_t>(result.value) >= 0);
+        CHECK(result.latency >= 0ms);
+        CHECK(result.detail.find("TCP connection established") != std::string::npos);
+
+        const auto example_path = std::filesystem::path(PIXELSTATUS_TEST_DATA_DIR)
+            / "tcp-connect.example.json";
+        const auto loaded = pixelstatus::load_config_file(example_path);
+        CHECK(loaded);
+        if (!loaded.config || loaded.config->monitors.empty()) {
+            return;
+        }
+        auto pull = loaded.config->monitors.front();
+        auto tcp = std::get<pixelstatus::TcpConnectMonitorConfig>(pull.source);
+        tcp.port = server.port();
+        pull.source = tcp;
+        created = pixelstatus::host::create_monitor_runner(pull.source);
+        CHECK(created);
+
+        pixelstatus::StateStore states;
+        pixelstatus::MonitorEngine engine(states);
+        pixelstatus::MonitorDefinition definition;
+        definition.id = pull.id;
+        definition.interval = pull.interval;
+        definition.ttl = pull.ttl;
+        definition.evaluation = pull.evaluation;
+        const auto now = std::chrono::steady_clock::now();
+        CHECK(engine.add(std::move(definition), std::move(created.runner), now));
+        const auto report = engine.run_due(now);
+        CHECK(report.executed == 1U);
+        CHECK(report.state_updates == 1U);
+        const auto state = states.resolve("tcp-health", std::chrono::steady_clock::now());
+        CHECK(state && state->effective_status == "ok");
+        CHECK(state && std::holds_alternative<std::int64_t>(state->state.value));
+
+        pixelstatus::Frame frame(1U, 1U);
+        const auto render_report = pixelstatus::Renderer(now).render(
+            states,
+            *loaded.config,
+            std::chrono::steady_clock::now(),
+            frame);
+        CHECK(render_report.success);
+        CHECK((*frame.pixel(0U, 0U) == pixelstatus::Rgb{0x00, 0xC8, 0x53}));
+    }
+
+    pixelstatus::TcpConnectMonitorConfig unavailable;
+    unavailable.host = "127.0.0.1";
+    unavailable.port = closed_port;
+    unavailable.timeout = 50ms;
+    auto created = pixelstatus::host::create_tcp_connect_monitor_runner(unavailable);
+    CHECK(created);
+    const auto result = created.runner->run(std::chrono::steady_clock::now());
+    CHECK(!result.transport_success);
+    CHECK(result.error == pixelstatus::MonitorError::connection
+          || result.error == pixelstatus::MonitorError::timeout);
+
+    unavailable.host = "bad host";
+    CHECK(!pixelstatus::host::create_tcp_connect_monitor_runner(unavailable));
+    unavailable.host = "127.0.0.1";
+    unavailable.port = 0U;
+    CHECK(!pixelstatus::host::create_tcp_connect_monitor_runner(unavailable));
+    unavailable.port = 80U;
+    unavailable.timeout = 0ms;
+    CHECK(!pixelstatus::host::create_tcp_connect_monitor_runner(unavailable));
+}
+
+void test_host_dns_monitor_runner() {
+    pixelstatus::DnsMonitorConfig config;
+    config.host = "localhost";
+    config.family = pixelstatus::DnsAddressFamily::ipv4;
+    config.observation = pixelstatus::DnsObservation::addresses;
+    config.timeout = 1s;
+
+    auto created = pixelstatus::host::create_dns_monitor_runner(config);
+    CHECK(created);
+    auto result = created.runner->run(std::chrono::steady_clock::now());
+    CHECK(result.transport_success);
+    CHECK(result.error == pixelstatus::MonitorError::none);
+    CHECK(std::holds_alternative<std::string>(result.value));
+    CHECK(std::get<std::string>(result.value).find("127.0.0.1") != std::string::npos);
+    CHECK(result.detail.find("DNS resolved localhost") != std::string::npos);
+
+    config.observation = pixelstatus::DnsObservation::address_count;
+    created = pixelstatus::host::create_dns_monitor_runner(config);
+    CHECK(created);
+    result = created.runner->run(std::chrono::steady_clock::now());
+    CHECK(result.transport_success);
+    CHECK(std::holds_alternative<std::int64_t>(result.value));
+    CHECK(std::get<std::int64_t>(result.value) >= 1);
+
+    config.observation = pixelstatus::DnsObservation::latency_ms;
+    created = pixelstatus::host::create_dns_monitor_runner(config);
+    CHECK(created);
+    result = created.runner->run(std::chrono::steady_clock::now());
+    CHECK(result.transport_success);
+    CHECK(std::holds_alternative<std::int64_t>(result.value));
+    CHECK(std::get<std::int64_t>(result.value) >= 0);
+
+    const auto example_path = std::filesystem::path(PIXELSTATUS_TEST_DATA_DIR)
+        / "dns-monitor.example.json";
+    const auto loaded = pixelstatus::load_config_file(example_path);
+    CHECK(loaded);
+    if (!loaded.config || loaded.config->monitors.empty()) {
+        return;
+    }
+    const auto pull = loaded.config->monitors.front();
+    created = pixelstatus::host::create_monitor_runner(pull.source);
+    CHECK(created);
+
+    pixelstatus::StateStore states;
+    pixelstatus::MonitorEngine engine(states);
+    pixelstatus::MonitorDefinition definition;
+    definition.id = pull.id;
+    definition.interval = pull.interval;
+    definition.ttl = pull.ttl;
+    definition.evaluation = pull.evaluation;
+    const auto now = std::chrono::steady_clock::now();
+    CHECK(engine.add(std::move(definition), std::move(created.runner), now));
+    const auto report = engine.run_due(now);
+    CHECK(report.executed == 1U);
+    CHECK(report.state_updates == 1U);
+    const auto state = states.resolve("localhost-dns", std::chrono::steady_clock::now());
+    CHECK(state && state->effective_status == "ok");
+    CHECK(state && std::holds_alternative<std::string>(state->state.value));
+
+    pixelstatus::Frame frame(1U, 1U);
+    const auto render_report = pixelstatus::Renderer(now).render(
+        states,
+        *loaded.config,
+        std::chrono::steady_clock::now(),
+        frame);
+    CHECK(render_report.success);
+    CHECK((*frame.pixel(0U, 0U) == pixelstatus::Rgb{0x00, 0xC8, 0x53}));
+
+    config.host = "bad host";
+    CHECK(!pixelstatus::host::create_dns_monitor_runner(config));
+    config.host = "localhost";
+    config.family = static_cast<pixelstatus::DnsAddressFamily>(99);
+    CHECK(!pixelstatus::host::create_dns_monitor_runner(config));
+    config.family = pixelstatus::DnsAddressFamily::ipv4;
+    config.observation = static_cast<pixelstatus::DnsObservation>(99);
+    CHECK(!pixelstatus::host::create_dns_monitor_runner(config));
+    config.observation = pixelstatus::DnsObservation::addresses;
+    config.timeout = 0ms;
+    CHECK(!pixelstatus::host::create_dns_monitor_runner(config));
+}
+
 void test_http_display_driver() {
     pixelstatus::host::HttpDisplayOptions options;
     options.port = 0;
@@ -1152,15 +1476,21 @@ int main() {
     test_mi_protocol_vectors();
     test_sample_configuration();
     test_http_monitor_configuration();
+    test_tcp_connect_monitor_configuration();
+    test_dns_monitor_configuration();
     test_configuration_rejects_unknown_fields();
     test_configuration_rejects_invalid_identifiers();
     test_configuration_rejects_invalid_monitor();
+    test_configuration_rejects_invalid_tcp_monitor();
+    test_configuration_rejects_invalid_dns_monitor();
     test_status_api();
     test_evaluator_comparisons();
     test_monitor_engine();
 #ifdef PIXELSTATUS_TEST_HOST_HTTP
     test_monitor_executor_concurrency();
     test_host_http_monitor_runner();
+    test_host_tcp_connect_monitor_runner();
+    test_host_dns_monitor_runner();
     test_http_display_driver();
 #endif
 

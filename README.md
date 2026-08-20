@@ -29,6 +29,10 @@ Declarative HTTP GET monitoring with bounded body, timeout, status/body/JSON-Poi
 observation, and a loopback-tested desktop adapter now uses those contracts. A
 bounded desktop worker pool prevents one slow check from stalling unrelated
 monitors or either display backend.
+TCP-connect monitoring uses the same scheduler and evaluator while exposing
+successful connection latency as a numeric observation.
+Standalone DNS monitoring adds address-family filtering plus address-list, count,
+and lookup-latency observations without changing those contracts.
 The same rendered framebuffer is also available through a responsive
 [Browser Display Backend](docs/http-display.md), including a read-only frame API and
 headless host mode.
@@ -2145,7 +2149,7 @@ persistence hardening, management UI, and OTA. Each monitor and output backend s
 enter through the established state, rendering, and driver contracts.
 
 Status: the portable interval scheduler, runner boundary, normalized result, generic
-evaluator, strict monitor JSON grammar, and first desktop HTTP/JSON runner are
-host-tested. The Win32 host also has a bounded multi-worker executor with per-monitor
-in-flight exclusion. HTTPS, additional network runners, jitter/cron support, and
-in-flight cancellation remain incremental follow-on work.
+evaluator, strict monitor JSON grammar, and desktop HTTP/JSON, TCP-connect, and DNS
+runners are host-tested. The Win32 host also has a bounded multi-worker executor
+with per-monitor in-flight exclusion. HTTPS, additional network runners,
+jitter/cron support, and in-flight cancellation remain incremental follow-on work.

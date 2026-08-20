@@ -5,7 +5,7 @@
 
 namespace pixelstatus::host {
 
-[[nodiscard]] MonitorRunnerCreationResult create_http_monitor_runner(
-    HttpMonitorConfig config);
+[[nodiscard]] MonitorRunnerCreationResult create_tcp_connect_monitor_runner(
+    TcpConnectMonitorConfig config);
 
 }  // namespace pixelstatus::host
