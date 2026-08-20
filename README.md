@@ -39,8 +39,9 @@ and lookup-latency observations without changing those contracts.
 The same rendered framebuffer is also available through a responsive
 [Browser Display Backend](docs/http-display.md), including a read-only frame API and
 headless host mode.
-The planned desktop/ESP32 TLS split and the integration requirements for TrueNAS
-CORE, UniFi, Netgear cable modems, and Starlink are described in
+The implemented WinHTTP/Schannel desktop TLS path, planned ESP32 TLS path, named
+secret handling, and integration requirements for TrueNAS CORE, UniFi, Netgear
+cable modems, and Starlink are described in
 [Appliance Monitoring and TLS](docs/appliance-monitoring.md).
 
 ---
@@ -2161,6 +2162,7 @@ Status: the portable interval scheduler, runner boundary, normalized result, gen
 evaluator, strict monitor JSON grammar, and desktop HTTP/JSON (including request
 methods, headers, and bodies), TCP-connect,
 TCP-exchange, and DNS runners are host-tested. The Win32 host also has a bounded
-multi-worker executor with per-monitor in-flight exclusion. HTTPS, additional
-network runners, secret-provider integration, jitter/cron support, and in-flight
+multi-worker executor with per-monitor in-flight exclusion. WinHTTP/Schannel HTTPS
+and named desktop secrets are host-tested. Per-monitor custom TLS trust, ESP32
+secret storage, additional network runners, jitter/cron support, and in-flight
 cancellation remain incremental follow-on work.

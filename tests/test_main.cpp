@@ -294,7 +294,8 @@ void test_http_request_configuration() {
     CHECK(http.method == pixelstatus::HttpMethod::post);
     CHECK(http.headers.size() == 2U);
     CHECK(std::any_of(http.headers.begin(), http.headers.end(), [](const auto& header) {
-        return header.name == "X-PixelStatus-Probe" && header.value == "desktop-example";
+        return header.name == "X-PixelStatus-Probe"
+            && header.value == "${secret:http-request-token}";
     }));
     CHECK(http.body == R"({"operation":"health"})");
     CHECK(http.observation == pixelstatus::HttpObservation::json_pointer);
@@ -817,7 +818,8 @@ void test_configuration_rejects_invalid_monitor() {
               "headers": {
                 "Bad Header": "invalid",
                 "Host": "override.invalid",
-                "X-Control": "bad\nvalue"
+                "X-Control": "bad\nvalue",
+                "X-Secret": "Bearer ${secret:bad/name}"
               },
               "body": "{}",
               "interval": "100ms",
@@ -847,6 +849,7 @@ void test_configuration_rejects_invalid_monitor() {
     CHECK(errors_contain("invalid field name"));
     CHECK(errors_contain("cannot override Host"));
     CHECK(errors_contain("without control characters"));
+    CHECK(errors_contain("invalid secret reference"));
     CHECK(errors_contain(".body is not allowed"));
     CHECK(errors_contain(".interval must be between"));
     CHECK(errors_contain(".observe.json_pointer is invalid"));
@@ -1199,6 +1202,13 @@ public:
                 accepted ? R"({"accepted":true})" : R"({"accepted":false})",
                 "application/json");
         });
+        server_.Get("/secret", [](const httplib::Request& request, httplib::Response& response) {
+            const auto authorized =
+                request.get_header_value("Authorization") == "Bearer resolved-token";
+            response.set_content(
+                authorized ? R"({"authorized":true})" : R"({"authorized":false})",
+                "application/json");
+        });
 
         port_ = server_.bind_to_any_port("127.0.0.1");
         if (port_ <= 0) {
@@ -1276,6 +1286,40 @@ void test_host_http_monitor_runner() {
     CHECK(std::holds_alternative<bool>(result.value));
     CHECK(std::get<bool>(result.value));
 
+    config.url = server.url("/secret");
+    config.method = pixelstatus::HttpMethod::get;
+    config.headers = {
+        {"Authorization", "Bearer ${secret:unit-api-key}"},
+    };
+    config.body.clear();
+    config.observation = pixelstatus::HttpObservation::json_pointer;
+    config.json_pointer = "/authorized";
+    const pixelstatus::host::SecretResolver resolver =
+        [](std::string_view name) -> std::optional<std::string> {
+        return name == "unit-api-key"
+            ? std::optional<std::string>{"resolved-token"}
+            : std::nullopt;
+    };
+    created = pixelstatus::host::create_http_monitor_runner(config, resolver);
+    CHECK(created);
+    result = created.runner->run(std::chrono::steady_clock::now());
+    CHECK(result.transport_success);
+    CHECK(std::holds_alternative<bool>(result.value));
+    CHECK(std::get<bool>(result.value));
+
+    created = pixelstatus::host::create_http_monitor_runner(config);
+    CHECK(!created);
+    CHECK(created.error.find("unit-api-key") != std::string::npos);
+    CHECK(created.error.find("resolved-token") == std::string::npos);
+
+    const pixelstatus::host::SecretResolver unsafe_resolver =
+        [](std::string_view) -> std::optional<std::string> {
+        return "do-not-log\n";
+    };
+    created = pixelstatus::host::create_http_monitor_runner(config, unsafe_resolver);
+    CHECK(!created);
+    CHECK(created.error.find("do-not-log") == std::string::npos);
+
     config.method = pixelstatus::HttpMethod::get;
     config.headers.clear();
     config.body.clear();
@@ -1321,7 +1365,24 @@ void test_host_http_monitor_runner() {
     CHECK(result.error == pixelstatus::MonitorError::response_too_large);
 
     config.url = "https://example.test/health";
+#ifdef _WIN32
+    CHECK(pixelstatus::host::create_http_monitor_runner(config));
+    config.url = server.url("/health");
+    config.url.replace(0U, 4U, "https");
+    config.timeout = 1s;
+    created = pixelstatus::host::create_http_monitor_runner(config);
+    CHECK(created);
+    result = created.runner->run(std::chrono::steady_clock::now());
+    CHECK(!result.transport_success);
+    if (result.error != pixelstatus::MonitorError::tls) {
+        std::cerr << "Expected TLS failure, received "
+                  << pixelstatus::monitor_error_name(result.error)
+                  << ": " << result.detail << '\n';
+    }
+    CHECK(result.error == pixelstatus::MonitorError::tls);
+#else
     CHECK(!pixelstatus::host::create_http_monitor_runner(config));
+#endif
     config.url = "http://127.0.0.1:99999/health";
     CHECK(!pixelstatus::host::create_http_monitor_runner(config));
     config.url = server.url("/health");

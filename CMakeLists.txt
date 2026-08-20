@@ -70,6 +70,7 @@ if(PIXELSTATUS_BUILD_HOST_HTTP)
         src/host/http_monitor_runner.cpp
         src/host/monitor_executor.cpp
         src/host/monitor_runner_factory.cpp
+        src/host/secret_resolver.cpp
         src/host/socket_transport.cpp
         src/host/tcp_connect_monitor_runner.cpp
         src/host/tcp_exchange_monitor_runner.cpp
@@ -81,7 +82,14 @@ if(PIXELSTATUS_BUILD_HOST_HTTP)
         nlohmann_json::nlohmann_json
     )
     if(WIN32)
-        target_link_libraries(pixelstatus_host PRIVATE ws2_32)
+        target_sources(pixelstatus_host PRIVATE
+            src/host/winhttp_http_transport.cpp
+        )
+        target_link_libraries(pixelstatus_host PRIVATE advapi32 winhttp ws2_32)
+        target_compile_definitions(pixelstatus_host PRIVATE
+            NOMINMAX
+            WIN32_LEAN_AND_MEAN
+        )
     endif()
 
     if(MSVC)
@@ -132,6 +140,9 @@ if(PIXELSTATUS_BUILD_SIMULATOR)
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             ${CMAKE_CURRENT_SOURCE_DIR}/examples/http-request.example.json
             $<TARGET_FILE_DIR:pixelstatus_simulator>/http-request.example.json
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            ${CMAKE_CURRENT_SOURCE_DIR}/examples/https-monitor.example.json
+            $<TARGET_FILE_DIR:pixelstatus_simulator>/https-monitor.example.json
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             ${CMAKE_CURRENT_SOURCE_DIR}/examples/concurrent-monitors.example.json
             $<TARGET_FILE_DIR:pixelstatus_simulator>/concurrent-monitors.example.json

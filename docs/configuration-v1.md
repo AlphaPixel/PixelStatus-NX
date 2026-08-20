@@ -119,8 +119,9 @@ and inclusive `between`. Every referenced status must exist in the top-level
 ### HTTP
 
 HTTP requests default to `GET`. The desktop adapter also supports `HEAD`, `POST`,
-`PUT`, `PATCH`, and `DELETE`, bounded custom headers, and a bounded text body. TLS
-and secret-reference resolution are separate increments.
+`PUT`, `PATCH`, and `DELETE`, bounded custom headers, and a bounded text body.
+On Windows, `https://` uses WinHTTP/Schannel with the Windows trusted-root stores,
+hostname validation, and redirects disabled.
 
 ```json
 {
@@ -175,10 +176,27 @@ transport. Values containing control characters are rejected. Request bodies are
 limited to 16 KiB and non-empty bodies are rejected for `GET` and `HEAD`.
 
 Literal authorization headers are accepted so the complete transport can be tested,
-but production credentials must not be committed with configuration. The planned
-secret-provider boundary will resolve named secrets from a desktop credential store
-or encrypted ESP32 storage. See
+but production credentials must not be committed with configuration. Header values
+can contain one or more named references such as
+`Authorization: Bearer ${secret:truenas-api-key}`. Names are 1–128 ASCII letters,
+digits, dots, underscores, or hyphens. The desktop resolves each reference when the
+monitor is created and fails startup if any reference is invalid or unresolved.
+
+The Windows resolver checks an environment variable first. It uppercases the name,
+replaces non-alphanumeric characters with underscores, and prefixes
+`PIXELSTATUS_SECRET_`; `truenas-api-key` therefore becomes
+`PIXELSTATUS_SECRET_TRUENAS_API_KEY`. If it is absent, the resolver checks the
+current user's generic Windows Credential Manager entry named
+`PixelStatus-NX/truenas-api-key`. Resolved values are revalidated against the
+header bounds and never included in runner diagnostics. Environment variables are
+intended for tests and development; Credential Manager is the desktop production
+store. Encrypted ESP32 NVS remains the firmware equivalent. See
 [Appliance Monitoring and TLS](appliance-monitoring.md) for that design.
+
+To provision a desktop secret without a command-line copy, open **Credential
+Manager → Windows Credentials → Add a generic credential**. Use
+`PixelStatus-NX/<name>` as the Internet or network address, any descriptive user
+name, and the secret as the password.
 
 Exactly one observation is selected:
 
@@ -196,7 +214,9 @@ a successful null observation so `exists` and `not_exists` rules can classify it
 
 Complete runnable shapes are in
 [`http-monitor.example.json`](../examples/http-monitor.example.json) and
-[`http-request.example.json`](../examples/http-request.example.json).
+[`http-request.example.json`](../examples/http-request.example.json). A public
+system-trust check is in
+[`https-monitor.example.json`](../examples/https-monitor.example.json).
 
 ### TCP Connect
 

@@ -123,10 +123,10 @@ resolver call itself remains non-cancellable.
 
 ## Deliberately Deferred
 
-HTTPS, secret-provider integration, cookie/session authentication, DNS record-type
-queries, binary or multi-step TCP exchanges, jitter, cron scheduling, and in-flight
-request cancellation remain deferred. HTTPS URLs are valid portable configuration,
-but the current desktop factory rejects them at startup because this build
-deliberately does not link a TLS library. The selected desktop and ESP32 TLS paths,
-plus the requirements of the first target appliances, are recorded in
+Per-monitor custom CAs and certificate pins, cookie/session authentication, DNS
+record-type queries, binary or multi-step TCP exchanges, jitter, cron scheduling,
+and in-flight request cancellation remain deferred. The Windows host now performs
+HTTPS with WinHTTP/Schannel system trust and resolves named header secrets from the
+environment or Windows Credential Manager. The selected desktop and ESP32 TLS
+paths, plus the requirements of the first target appliances, are recorded in
 [Appliance Monitoring and TLS](appliance-monitoring.md).

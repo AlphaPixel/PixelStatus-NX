@@ -11,11 +11,13 @@
 
 namespace pixelstatus::host {
 
-MonitorRunnerCreationResult create_monitor_runner(MonitorSourceConfig config) {
-    return std::visit([](auto source) -> MonitorRunnerCreationResult {
+MonitorRunnerCreationResult create_monitor_runner(
+    MonitorSourceConfig config,
+    const SecretResolver& secret_resolver) {
+    return std::visit([&secret_resolver](auto source) -> MonitorRunnerCreationResult {
         using Source = std::decay_t<decltype(source)>;
         if constexpr (std::is_same_v<Source, HttpMonitorConfig>) {
-            return create_http_monitor_runner(std::move(source));
+            return create_http_monitor_runner(std::move(source), secret_resolver);
         } else if constexpr (std::is_same_v<Source, TcpConnectMonitorConfig>) {
             return create_tcp_connect_monitor_runner(std::move(source));
         } else if constexpr (std::is_same_v<Source, TcpExchangeMonitorConfig>) {
@@ -24,6 +26,11 @@ MonitorRunnerCreationResult create_monitor_runner(MonitorSourceConfig config) {
             return create_dns_monitor_runner(std::move(source));
         }
     }, std::move(config));
+}
+
+MonitorRunnerCreationResult create_monitor_runner(MonitorSourceConfig config) {
+    const auto resolver = system_secret_resolver();
+    return create_monitor_runner(std::move(config), resolver);
 }
 
 }  // namespace pixelstatus::host

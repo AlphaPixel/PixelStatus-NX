@@ -11,11 +11,6 @@
         "solid": "#00C853"
       }
     },
-    "warn": {
-      "appearance": {
-        "solid": "#FFD600"
-      }
-    },
     "communication_failure": {
       "appearance": {
         "solid": "#FF00FF"
@@ -34,34 +29,31 @@
   },
   "monitors": [
     {
-      "id": "authenticated-query",
+      "id": "public-https",
       "type": "http",
-      "url": "http://127.0.0.1:18080/query",
-      "method": "POST",
+      "url": "https://example.com/",
       "headers": {
-        "Content-Type": "application/json",
-        "X-PixelStatus-Probe": "${secret:http-request-token}"
+        "Accept": "text/html"
       },
-      "body": "{\"operation\":\"health\"}",
-      "interval": "10s",
-      "ttl": "30s",
-      "timeout": "2s",
+      "interval": "30s",
+      "ttl": "90s",
+      "timeout": "5s",
       "maximum_response_bytes": 4096,
       "observe": {
-        "json_pointer": "/accepted"
+        "status_code": true
       },
       "evaluate": [
         {
           "when": {
             "value": {
-              "equals": true
+              "equals": 200
             }
           },
           "status": "ok"
         },
         {
           "otherwise": {
-            "status": "warn"
+            "status": "unknown"
           }
         }
       ]
@@ -69,8 +61,8 @@
   ],
   "indicators": [
     {
-      "id": "authenticated-query-indicator",
-      "source": "authenticated-query",
+      "id": "public-https-indicator",
+      "source": "public-https",
       "x": 0,
       "y": 0,
       "width": 1,

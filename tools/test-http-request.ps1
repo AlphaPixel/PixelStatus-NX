@@ -14,6 +14,12 @@ $mockServer = Resolve-Path -LiteralPath 'tools\mock-health-server.py'
 $config = Resolve-Path -LiteralPath 'examples\http-request.example.json'
 $python = Get-Command python -ErrorAction Stop
 $token = 'pixelstatus-http-request-integration-test'
+$secretVariable = 'PIXELSTATUS_SECRET_HTTP_REQUEST_TOKEN'
+$previousSecret = [Environment]::GetEnvironmentVariable($secretVariable, 'Process')
+[Environment]::SetEnvironmentVariable(
+    $secretVariable,
+    'desktop-example',
+    'Process')
 $upstreamPort = 18080
 $quotedMockServer = '"{0}"' -f $mockServer.Path
 $quotedConfig = '"{0}"' -f $config.Path
@@ -91,4 +97,8 @@ try {
         Stop-Process -Id $mockProcess.Id
         $mockProcess.WaitForExit()
     }
+    [Environment]::SetEnvironmentVariable(
+        $secretVariable,
+        $previousSecret,
+        'Process')
 }

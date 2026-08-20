@@ -45,6 +45,7 @@ adds these shared entries to the **Startup Item** dropdown:
 | `Simulator - Native Only (Push API)` | Win32 output without the browser server | Status API `18807` |
 | `Simulator - HTTP Monitor (Native + Browser)` | HTTP/JSON monitor example with both outputs | Status API `18817`, browser `18818` |
 | `Simulator - HTTP Request Monitor` | Authenticated JSON POST with custom headers and body | Status API `18877`, browser `18878` |
+| `Simulator - HTTPS Monitor` | Public HTTPS system-trust check | Status API `18887`, browser `18888` |
 | `Simulator - Concurrent HTTP Monitors` | Headless two-monitor slow/fast concurrency example | Status API `18837`, browser `18838` |
 | `Simulator - TCP Connect Monitor` | Headless TCP-connect latency example | Status API `18847`, browser `18848` |
 | `Simulator - DNS Monitor` | Headless localhost IPv4 resolution example | Status API `18857`, browser `18858` |
@@ -68,6 +69,11 @@ The shared development bearer token used by the relevant profiles is
 `pixelstatus-vs-debug`. It is deliberately non-secret and is valid only for the
 locally launched debug process.
 
+The HTTP Request profile also supplies
+`PIXELSTATUS_SECRET_HTTP_REQUEST_TOKEN=desktop-example` as a deliberately
+non-secret fixture. It exercises the same named-secret resolution used by
+production headers.
+
 Visual Studio normally discovers root launch profiles automatically. If they are
 hidden, choose **Show/Hide Debug Targets** from the Startup Item dropdown. A local
 `.vs\launch.vs.json` takes precedence over root entries with the same name; the
@@ -88,10 +94,18 @@ configured Win32 simulator publishes its JSON-derived state through the status A
 ```
 
 The authenticated-request smoke test verifies `POST`, explicit headers, a JSON
-request body, Boolean JSON extraction, evaluation, and state publication:
+request body, environment-secret resolution, Boolean JSON extraction, evaluation,
+and state publication:
 
 ```powershell
 .\tools\test-http-request.ps1
+```
+
+When Internet access is available, the HTTPS smoke test verifies a successful
+WinHTTP/Schannel handshake through the system trust store:
+
+```powershell
+.\tools\test-https-monitor.ps1
 ```
 
 The browser-display smoke test runs the renderer headlessly and verifies its HTML,
@@ -234,7 +248,9 @@ Each configured monitor can have only one request in flight at a time. See
 [`http-monitor.example.json`](../examples/http-monitor.example.json) for a complete
 single-monitor configuration and
 [`http-request.example.json`](../examples/http-request.example.json) for a JSON
-`POST` with custom request headers and body,
+`POST` with a named-secret request header and body, and
+[`https-monitor.example.json`](../examples/https-monitor.example.json) for the
+public system-trust path,
 [`concurrent-monitors.example.json`](../examples/concurrent-monitors.example.json)
 for the deterministic slow/fast fixture. TCP reachability and bounded text exchanges
 are shown in [`tcp-connect.example.json`](../examples/tcp-connect.example.json) and
@@ -273,10 +289,11 @@ scheduling.
 
 The host build does not include ESP-IDF, a cross-compiler, NimBLE transport, Wi-Fi,
 NVS, LittleFS, GPIO, or OTA support. MI packet construction is host-tested, but
-actual BLE behavior remains a hardware validation task. HTTPS and additional pull
-transports remain deferred; bounded HTTP methods, request headers and bodies, scalar
-JSON extraction, TCP connect, bounded TCP text exchange, DNS address resolution,
-evaluation, concurrent interval execution, and display responsiveness are
-implemented and host-tested. See
+actual BLE behavior remains a hardware validation task. WinHTTP/Schannel HTTPS,
+system certificate trust, named desktop secrets, bounded HTTP methods, request
+headers and bodies, scalar JSON extraction, TCP connect, bounded TCP text exchange,
+DNS address resolution, evaluation, concurrent interval execution, and display
+responsiveness are implemented and host-tested. Per-monitor custom CAs, certificate
+pins, and additional pull transports remain deferred. See
 [Appliance Monitoring and TLS](appliance-monitoring.md) for the selected Win32 and
 ESP32 TLS paths and appliance-integration requirements.

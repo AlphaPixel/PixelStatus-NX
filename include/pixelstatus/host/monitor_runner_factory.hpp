@@ -1,6 +1,7 @@
 #pragma once
 
 #include "pixelstatus/config.hpp"
+#include "pixelstatus/host/secret_resolver.hpp"
 #include "pixelstatus/monitor.hpp"
 
 #include <memory>
@@ -19,5 +20,9 @@ struct MonitorRunnerCreationResult {
 
 [[nodiscard]] MonitorRunnerCreationResult create_monitor_runner(
     MonitorSourceConfig config);
+
+[[nodiscard]] MonitorRunnerCreationResult create_monitor_runner(
+    MonitorSourceConfig config,
+    const SecretResolver& secret_resolver);
 
 }  // namespace pixelstatus::host

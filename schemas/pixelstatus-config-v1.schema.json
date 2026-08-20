@@ -283,7 +283,8 @@
           "additionalProperties": {
             "type": "string",
             "maxLength": 2048,
-            "pattern": "^[^\\x00-\\x1F\\x7F]*$"
+            "pattern": "^[^\\x00-\\x1F\\x7F]*$",
+            "description": "Literal value or template containing ${secret:name} references"
           }
         },
         "body": {

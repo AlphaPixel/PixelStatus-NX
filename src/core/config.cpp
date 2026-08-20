@@ -39,6 +39,7 @@ constexpr std::size_t maximum_http_header_count = 32U;
 constexpr std::size_t maximum_http_header_name_bytes = 128U;
 constexpr std::size_t maximum_http_header_value_bytes = 2U * 1024U;
 constexpr std::size_t maximum_http_headers_bytes = 8U * 1024U;
+constexpr std::size_t maximum_secret_name_bytes = 128U;
 constexpr std::size_t maximum_tcp_send_bytes = 4U * 1024U;
 constexpr std::size_t maximum_tcp_delimiter_bytes = 256U;
 
@@ -797,6 +798,34 @@ struct ParsedSteps {
         || lowered_name == "transfer-encoding" || lowered_name == "connection";
 }
 
+[[nodiscard]] bool valid_secret_name(std::string_view name) {
+    return !name.empty() && name.size() <= maximum_secret_name_bytes
+        && std::all_of(name.begin(), name.end(), [](char character) {
+            return (character >= 'A' && character <= 'Z')
+                || (character >= 'a' && character <= 'z')
+                || (character >= '0' && character <= '9')
+                || character == '.' || character == '_' || character == '-';
+        });
+}
+
+[[nodiscard]] bool valid_secret_template(std::string_view value) {
+    constexpr std::string_view prefix = "${secret:";
+    std::size_t offset{};
+    while (true) {
+        const auto begin = value.find(prefix, offset);
+        if (begin == std::string_view::npos) {
+            return true;
+        }
+        const auto name_begin = begin + prefix.size();
+        const auto end = value.find('}', name_begin);
+        if (end == std::string_view::npos
+            || !valid_secret_name(value.substr(name_begin, end - name_begin))) {
+            return false;
+        }
+        offset = end + 1U;
+    }
+}
+
 [[nodiscard]] std::optional<HttpMethod> parse_http_method_name(std::string_view method) {
     if (method == "GET") {
         return HttpMethod::get;
@@ -919,6 +948,14 @@ struct ParsedSteps {
                     continue;
                 }
                 const auto value = header.value().get<std::string>();
+                if (!valid_secret_template(value)) {
+                    add_error(
+                        result,
+                        std::string(path) + ".headers." + header.key()
+                            + " contains an invalid secret reference");
+                    request_valid = false;
+                    continue;
+                }
                 total_bytes += header.key().size() + value.size();
                 config.headers.push_back({header.key(), value});
             }

@@ -1,5 +1,6 @@
 #include "pixelstatus/host/http_monitor_runner.hpp"
 
+#include "http_transport.hpp"
 #include "pixelstatus/http_url.hpp"
 
 #include <httplib.h>
@@ -29,6 +30,7 @@ constexpr std::size_t maximum_header_name_bytes = 128U;
 constexpr std::size_t maximum_header_value_bytes = 2U * 1024U;
 constexpr std::size_t maximum_headers_bytes = 8U * 1024U;
 constexpr std::size_t maximum_json_pointer_bytes = 512U;
+constexpr std::size_t maximum_secret_name_bytes = 128U;
 
 std::string_view http_method_name(HttpMethod method) {
     switch (method) {
@@ -90,6 +92,54 @@ bool valid_header_value(std::string_view value) {
 bool transport_owns_header(std::string_view lowered_name) {
     return lowered_name == "host" || lowered_name == "content-length"
         || lowered_name == "transfer-encoding" || lowered_name == "connection";
+}
+
+bool valid_secret_name(std::string_view name) {
+    return !name.empty() && name.size() <= maximum_secret_name_bytes
+        && std::all_of(name.begin(), name.end(), [](char character) {
+            return (character >= 'A' && character <= 'Z')
+                || (character >= 'a' && character <= 'z')
+                || (character >= '0' && character <= '9')
+                || character == '.' || character == '_' || character == '-';
+        });
+}
+
+std::optional<std::string> resolve_secret_template(
+    std::string_view value,
+    const SecretResolver& resolver,
+    std::string& unresolved_name) {
+    constexpr std::string_view prefix = "${secret:";
+    std::string resolved;
+    resolved.reserve(value.size());
+    std::size_t offset{};
+    while (true) {
+        const auto begin = value.find(prefix, offset);
+        if (begin == std::string_view::npos) {
+            resolved.append(value.substr(offset));
+            return resolved;
+        }
+        resolved.append(value.substr(offset, begin - offset));
+        const auto name_begin = begin + prefix.size();
+        const auto end = value.find('}', name_begin);
+        const auto name = end == std::string_view::npos
+            ? std::string_view{}
+            : value.substr(name_begin, end - name_begin);
+        if (end == std::string_view::npos || !valid_secret_name(name)) {
+            unresolved_name = "<invalid>";
+            return std::nullopt;
+        }
+        if (!resolver) {
+            unresolved_name = std::string(name);
+            return std::nullopt;
+        }
+        auto secret = resolver(name);
+        if (!secret) {
+            unresolved_name = std::string(name);
+            return std::nullopt;
+        }
+        resolved.append(*secret);
+        offset = end + 1U;
+    }
 }
 
 bool valid_json_pointer(std::string_view pointer) {
@@ -160,93 +210,115 @@ std::optional<StateValue> json_scalar(const Json& value) {
     return std::nullopt;
 }
 
+HttpTransportResponse perform_httplib_request(
+    const HttpMonitorConfig& config,
+    const ParsedHttpUrl& url) {
+    const auto begin = std::chrono::steady_clock::now();
+    HttpTransportResponse result;
+    httplib::Client client(url.base);
+    if (!client.is_valid()) {
+        result.error = MonitorError::connection;
+        result.detail = "HTTP client could not parse or initialize the configured URL";
+        result.observed_at = std::chrono::steady_clock::now();
+        return result;
+    }
+    client.set_connection_timeout(config.timeout);
+    client.set_read_timeout(config.timeout);
+    client.set_write_timeout(config.timeout);
+    client.set_max_timeout(config.timeout);
+    client.set_follow_location(false);
+
+    httplib::Headers headers;
+    bool has_accept_header{};
+    for (const auto& header : config.headers) {
+        headers.emplace(header.name, header.value);
+        has_accept_header = has_accept_header || ascii_lower(header.name) == "accept";
+    }
+    if (config.observation == HttpObservation::json_pointer && !has_accept_header) {
+        headers.emplace("Accept", "application/json");
+    }
+    result.body.reserve(config.maximum_response_bytes);
+    bool response_too_large{};
+    httplib::Request request;
+    request.method = http_method_name(config.method);
+    request.path = url.target;
+    request.headers = std::move(headers);
+    request.body = config.body;
+    request.response_handler =
+        [&config, &response_too_large](const httplib::Response& incoming) {
+            if (incoming.has_header("Content-Length")
+                && incoming.get_header_value_u64("Content-Length")
+                    > config.maximum_response_bytes) {
+                response_too_large = true;
+                return false;
+            }
+            return true;
+        };
+    request.content_receiver =
+        [&config, &result, &response_too_large](
+            const char* data,
+            std::size_t length,
+            std::size_t,
+            std::size_t) {
+            if (length > config.maximum_response_bytes - result.body.size()) {
+                response_too_large = true;
+                return false;
+            }
+            result.body.append(data, length);
+            return true;
+        };
+    const auto response = client.send(request);
+    const auto finished = std::chrono::steady_clock::now();
+    result.observed_at = finished;
+    result.latency = std::chrono::duration_cast<Duration>(finished - begin);
+    if (!response) {
+        if (response_too_large) {
+            result.error = MonitorError::response_too_large;
+            result.detail = "HTTP response exceeded the configured body limit";
+            return result;
+        }
+        result.error = map_transport_error(response.error());
+        result.detail = "HTTP request failed: " + httplib::to_string(response.error());
+        return result;
+    }
+    result.success = true;
+    result.status_code = static_cast<std::uint32_t>(response->status);
+    return result;
+}
+
 class HttpMonitorRunner final : public MonitorRunner {
 public:
     HttpMonitorRunner(HttpMonitorConfig config, ParsedHttpUrl url)
         : config_(std::move(config)), url_(std::move(url)) {}
 
     MonitorResult run(TimePoint) override {
-        const auto begin = std::chrono::steady_clock::now();
+        auto transport = url_.scheme == HttpScheme::http
+            ? perform_httplib_request(config_, url_)
+#ifdef _WIN32
+            : perform_winhttp_request(config_);
+#else
+            : HttpTransportResponse{};
+#endif
         MonitorResult result;
-        httplib::Client client(url_.base);
-        if (!client.is_valid()) {
-            result.error = MonitorError::connection;
-            result.detail = "HTTP client could not parse or initialize the configured URL";
-            result.observed_at = std::chrono::steady_clock::now();
-            return result;
-        }
-        client.set_connection_timeout(config_.timeout);
-        client.set_read_timeout(config_.timeout);
-        client.set_write_timeout(config_.timeout);
-        client.set_max_timeout(config_.timeout);
-        client.set_follow_location(false);
-
-        httplib::Headers headers;
-        bool has_accept_header{};
-        for (const auto& header : config_.headers) {
-            headers.emplace(header.name, header.value);
-            has_accept_header = has_accept_header || ascii_lower(header.name) == "accept";
-        }
-        if (config_.observation == HttpObservation::json_pointer && !has_accept_header) {
-            headers.emplace("Accept", "application/json");
-        }
-        std::string response_body;
-        response_body.reserve(config_.maximum_response_bytes);
-        bool response_too_large{};
-        httplib::Request request;
-        request.method = http_method_name(config_.method);
-        request.path = url_.target;
-        request.headers = std::move(headers);
-        request.body = config_.body;
-        request.response_handler = [this, &response_too_large](
-                                       const httplib::Response& incoming) {
-                if (incoming.has_header("Content-Length")
-                    && incoming.get_header_value_u64("Content-Length")
-                        > config_.maximum_response_bytes) {
-                    response_too_large = true;
-                    return false;
-                }
-                return true;
-            };
-        request.content_receiver =
-            [this, &response_body, &response_too_large](
-                const char* data,
-                std::size_t length,
-                std::size_t,
-                std::size_t) {
-                if (length > config_.maximum_response_bytes - response_body.size()) {
-                    response_too_large = true;
-                    return false;
-                }
-                response_body.append(data, length);
-                return true;
-            };
-        const auto response = client.send(request);
-        const auto finished = std::chrono::steady_clock::now();
-        result.observed_at = finished;
-        result.latency = std::chrono::duration_cast<Duration>(finished - begin);
-        if (!response) {
-            if (response_too_large) {
-                result.error = MonitorError::response_too_large;
-                result.detail = "HTTP response exceeded the configured body limit";
-                return result;
-            }
-            result.error = map_transport_error(response.error());
-            result.detail = "HTTP request failed: " + httplib::to_string(response.error());
+        result.observed_at = transport.observed_at;
+        result.latency = transport.latency;
+        if (!transport.success) {
+            result.error = transport.error;
+            result.detail = std::move(transport.detail);
             return result;
         }
         result.transport_success = true;
-        result.detail = "HTTP " + std::to_string(response->status);
+        result.detail = "HTTP " + std::to_string(transport.status_code);
         if (config_.observation == HttpObservation::status_code) {
-            result.value = static_cast<std::int64_t>(response->status);
+            result.value = static_cast<std::int64_t>(transport.status_code);
             return result;
         }
         if (config_.observation == HttpObservation::body) {
-            result.value = response_body;
+            result.value = std::move(transport.body);
             return result;
         }
 
-        const auto document = Json::parse(response_body, nullptr, false, true);
+        const auto document = Json::parse(transport.body, nullptr, false, true);
         if (document.is_discarded()) {
             result.transport_success = false;
             result.error = MonitorError::invalid_response;
@@ -285,14 +357,18 @@ private:
 
 }  // namespace
 
-MonitorRunnerCreationResult create_http_monitor_runner(HttpMonitorConfig config) {
+MonitorRunnerCreationResult create_http_monitor_runner(
+    HttpMonitorConfig config,
+    const SecretResolver& secret_resolver) {
     auto url = parse_http_url(config.url);
     if (!url) {
         return {nullptr, "HTTP URL is invalid or unsupported by the desktop adapter"};
     }
+#ifndef _WIN32
     if (url->scheme != HttpScheme::http) {
         return {nullptr, "HTTPS is not enabled in the current desktop HTTP adapter"};
     }
+#endif
     if (http_method_name(config.method).empty()) {
         return {nullptr, "HTTP method is invalid"};
     }
@@ -308,12 +384,25 @@ MonitorRunnerCreationResult create_http_monitor_runner(HttpMonitorConfig config)
     }
     std::unordered_set<std::string> header_names;
     std::size_t header_bytes{};
-    for (const auto& header : config.headers) {
+    for (auto& header : config.headers) {
         const auto lowered_name = ascii_lower(header.name);
-        if (!valid_header_name(header.name) || !valid_header_value(header.value)
-            || transport_owns_header(lowered_name)
+        if (!valid_header_name(header.name) || transport_owns_header(lowered_name)
             || !header_names.emplace(lowered_name).second) {
             return {nullptr, "HTTP request contains an invalid header"};
+        }
+        std::string unresolved_name;
+        auto resolved = resolve_secret_template(
+            header.value, secret_resolver, unresolved_name);
+        if (!resolved) {
+            return {
+                nullptr,
+                "HTTP request header " + header.name
+                    + " references unresolved secret " + unresolved_name,
+            };
+        }
+        header.value = std::move(*resolved);
+        if (!valid_header_value(header.value)) {
+            return {nullptr, "HTTP request contains an invalid resolved header"};
         }
         header_bytes += header.name.size() + header.value.size();
     }

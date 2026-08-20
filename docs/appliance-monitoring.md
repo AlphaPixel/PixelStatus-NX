@@ -10,18 +10,20 @@ libraries as long as they implement the same `MonitorRunner` result contract.
 The desktop HTTP runner currently supports bounded `GET`, `HEAD`, `POST`, `PUT`,
 `PATCH`, and `DELETE` requests with explicit headers and request bodies. It can
 observe response status or body, or extract a scalar with RFC 6901 JSON Pointer.
-It is tested over plain loopback HTTP. HTTPS configuration is accepted by the
-portable parser but rejected by the current host runner until TLS is added.
+Plain HTTP is integration-tested against the loopback fixture. On Windows, HTTPS
+uses WinHTTP/Schannel with system certificate and hostname validation.
 
-Literal authorization headers are useful for local fixtures but are not an
-acceptable production credential store. A named secret-provider boundary is
-required before real appliance keys or passwords are placed in configuration.
+Header values support named `${secret:name}` substitution. The Windows host
+resolves environment variables for development and generic Windows Credential
+Manager entries for production. Resolution occurs once during monitor creation;
+unresolved references fail startup and resolved values are never placed in
+diagnostics.
 
 ## TLS Backends
 
 | Target | Preferred backend | Trust sources | Reason |
 | --- | --- | --- | --- |
-| Windows desktop | WinHTTP with Schannel | Windows root stores; optional installed private CA or explicit certificate/public-key pin | No separately built TLS library, native proxy and certificate behavior |
+| Windows desktop | WinHTTP with Schannel (implemented) | Windows root stores; optional installed private CA | No separately built TLS library, native proxy and certificate behavior |
 | ESP32 | ESP-IDF `esp_http_client` over ESP-TLS/mbedTLS | ESP x509 bundle or per-appliance PEM CA; optional pin | Native supported firmware path with bounded configuration |
 | Optional portable desktop | `cpp-httplib` with mbedTLS, OpenSSL, or wolfSSL | Backend CA file/path | Useful if a non-Windows host is added; introduces a native TLS dependency |
 | Optional feature-rich desktop | libcurl, preferably its Schannel build on Windows | Windows root stores or curl CA configuration | Consider only if proxy, cookies, or authentication workflows outgrow WinHTTP |
@@ -29,7 +31,8 @@ required before real appliance keys or passwords are placed in configuration.
 WinHTTP performs TLS and server-certificate validation through Windows. This lets
 development machines trust a local appliance CA through the normal Windows
 certificate store. A per-appliance pin is useful when changing the machine-wide
-trust store is undesirable, but pin rollover must be planned.
+trust store is undesirable, but pin verification and rollover remain a later
+increment.
 
 ESP-IDF HTTPS uses ESP-TLS and mbedTLS. Public Internet services can use the ESP
 certificate bundle; a self-signed or privately issued LAN appliance should provide
@@ -58,16 +61,18 @@ Official references:
 
 ## Credentials
 
-Production configuration should refer to credentials by name instead of containing
-their values, for example `"X-API-Key": "${secret:unifi-api-key}"`. Resolution
-must occur immediately before request construction, and diagnostics must never log
-resolved headers or bodies.
+Production configuration refers to credentials by name instead of containing their
+values, for example `"X-API-Key": "${secret:unifi-api-key}"` or
+`"Authorization": "Bearer ${secret:truenas-api-key}"`. The implemented Windows
+resolver first checks `PIXELSTATUS_SECRET_UNIFI_API_KEY`, then the current user's
+generic Credential Manager target `PixelStatus-NX/unifi-api-key`. Environment
+variables are intended for tests and unattended development; Credential Manager is
+the desktop production source.
 
-The first implementation should use Windows Credential Manager or DPAPI-backed
-storage on desktop and encrypted NVS on ESP32. Environment variables may be
-supported for tests and unattended desktop development, but not as the only
-production mechanism. Configuration validation should reject unresolved secrets
-before monitor registration.
+Resolution occurs immediately before runner construction. Invalid or unresolved
+references fail monitor registration, resolved headers are validated again, and
+diagnostics never log resolved values. Encrypted NVS remains the corresponding
+ESP32 implementation.
 
 ## TrueNAS CORE
 
@@ -167,17 +172,19 @@ Official sources:
 - [Official device protobuf](https://github.com/SpaceExplorationTechnologies/enterprise-api/blob/master/device-api/device.proto)
 - [Official Python demonstration](https://github.com/SpaceExplorationTechnologies/enterprise-api/blob/master/device-api/demo.py)
 
-## Implementation Order
+## Remaining Implementation Order
 
-1. Add secret references and desktop secret resolution, including redaction tests.
-2. Add a WinHTTP/Schannel HTTPS runner behind the existing HTTP runner factory and
-   test it against a local TLS fixture for valid, unknown-CA, hostname-mismatch, and
-   pinned-certificate cases.
-3. Validate one TrueNAS scalar request and one UniFi device-state request against
+Named secret references, environment/Credential Manager resolution, redaction
+tests, and the WinHTTP/Schannel system-trust runner are complete. Continue with:
+
+1. Add deterministic certificate fixtures for trusted, unknown-CA, hostname-
+   mismatch, and pinned-certificate cases; implement per-monitor pinning or private
+   CA selection only after that policy is fixed.
+2. Validate one TrueNAS scalar request and one UniFi device-state request against
    user-supplied fixtures or live appliances; add array aggregation only where a
    real response requires it.
-4. Build the Starlink desktop sidecar and recorded-response fixtures.
-5. Identify the exact Netgear modem model and decide whether reachability is enough
+3. Build the Starlink desktop sidecar and recorded-response fixtures.
+4. Identify the exact Netgear modem model and decide whether reachability is enough
    or a model-specific proxy is justified.
-6. Keep all of the above host-tested. Add ESP-IDF `esp_http_client` and encrypted-NVS
+5. Keep all of the above host-tested. Add ESP-IDF `esp_http_client` and encrypted-NVS
    adapters only when firmware deployment becomes necessary.
