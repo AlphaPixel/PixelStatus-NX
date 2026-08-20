@@ -4,6 +4,7 @@
 #include "pixelstatus/frame.hpp"
 #include "pixelstatus/state.hpp"
 
+#include <chrono>
 #include <cstddef>
 #include <string>
 
@@ -14,6 +15,9 @@ struct RenderReport {
     std::size_t rendered_indicators{};
     std::size_t missing_sources{};
     std::size_t missing_statuses{};
+    std::string active_card;
+    std::string next_card;
+    bool transitioning{};
     std::string error;
 };
 
@@ -25,6 +29,13 @@ public:
         const StateStore& states,
         const AppConfig& config,
         TimePoint now,
+        Frame& output) const;
+
+    [[nodiscard]] RenderReport render(
+        const StateStore& states,
+        const AppConfig& config,
+        TimePoint now,
+        std::chrono::system_clock::time_point wall_now,
         Frame& output) const;
 
 private:

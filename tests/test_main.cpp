@@ -186,6 +186,156 @@ void test_renderer() {
     CHECK((*frame.pixel(3, 1) == pixelstatus::Rgb{255, 0, 255}));
 }
 
+pixelstatus::CardConfig solid_card(
+    std::string id,
+    pixelstatus::Rgb color,
+    pixelstatus::Duration hold,
+    pixelstatus::CardTransition transition,
+    pixelstatus::Duration transition_duration) {
+    pixelstatus::BitmapCardConfig bitmap;
+    bitmap.palette.emplace('x', color);
+    bitmap.pixels = {"xx"};
+
+    pixelstatus::CardConfig card;
+    card.id = std::move(id);
+    card.hold = hold;
+    card.transition = {transition, transition_duration};
+    card.content = std::move(bitmap);
+    return card;
+}
+
+void test_card_deck_renderer() {
+    const auto origin = pixelstatus::TimePoint{};
+    pixelstatus::AppConfig config;
+    config.display = {2U, 1U, {0U, 0U, 0U}};
+    config.cards.push_back(solid_card(
+        "red", {255U, 0U, 0U}, 1s, pixelstatus::CardTransition::fade, 1s));
+    config.cards.push_back(solid_card(
+        "green", {0U, 255U, 0U}, 1s, pixelstatus::CardTransition::slide_left, 1s));
+    config.cards.push_back(solid_card(
+        "blue", {0U, 0U, 255U}, 1s, pixelstatus::CardTransition::instant, 0ms));
+
+    pixelstatus::StateStore states;
+    pixelstatus::Frame frame(2U, 1U);
+    const pixelstatus::Renderer renderer(origin);
+    const auto wall = std::chrono::system_clock::time_point{};
+
+    auto report = renderer.render(states, config, origin, wall, frame);
+    CHECK(report.success);
+    CHECK(report.active_card == "red");
+    CHECK(!report.transitioning);
+    CHECK((*frame.pixel(0U, 0U) == pixelstatus::Rgb{255U, 0U, 0U}));
+
+    report = renderer.render(states, config, origin + 1500ms, wall, frame);
+    CHECK(report.success);
+    CHECK(report.active_card == "red");
+    CHECK(report.next_card == "green");
+    CHECK(report.transitioning);
+    CHECK((*frame.pixel(0U, 0U) == pixelstatus::Rgb{128U, 128U, 0U}));
+
+    report = renderer.render(states, config, origin + 2s, wall, frame);
+    CHECK(report.active_card == "green");
+    CHECK((*frame.pixel(1U, 0U) == pixelstatus::Rgb{0U, 255U, 0U}));
+
+    report = renderer.render(states, config, origin + 3500ms, wall, frame);
+    CHECK(report.active_card == "green");
+    CHECK(report.next_card == "blue");
+    CHECK(report.transitioning);
+    CHECK((*frame.pixel(0U, 0U) == pixelstatus::Rgb{0U, 255U, 0U}));
+    CHECK((*frame.pixel(1U, 0U) == pixelstatus::Rgb{0U, 0U, 255U}));
+
+    report = renderer.render(states, config, origin + 4s, wall, frame);
+    CHECK(report.active_card == "blue");
+    CHECK((*frame.pixel(0U, 0U) == pixelstatus::Rgb{0U, 0U, 255U}));
+
+    report = renderer.render(states, config, origin + 5s, wall, frame);
+    CHECK(report.active_card == "red");
+    CHECK((*frame.pixel(0U, 0U) == pixelstatus::Rgb{255U, 0U, 0U}));
+}
+
+void test_card_deck_slide_directions() {
+    const auto origin = pixelstatus::TimePoint{};
+    pixelstatus::StateStore states;
+    const auto wall = std::chrono::system_clock::time_point{};
+
+    const auto check_transition = [&](
+        pixelstatus::CardTransition transition,
+        pixelstatus::Rgb expected_top_left,
+        pixelstatus::Rgb expected_bottom_right) {
+        pixelstatus::AppConfig config;
+        config.display = {2U, 2U, {0U, 0U, 0U}};
+
+        pixelstatus::BitmapCardConfig red;
+        red.palette.emplace('x', pixelstatus::Rgb{255U, 0U, 0U});
+        red.pixels = {"xx", "xx"};
+        pixelstatus::CardConfig first;
+        first.id = "first";
+        first.hold = 1s;
+        first.transition = {transition, 1s};
+        first.content = red;
+
+        pixelstatus::BitmapCardConfig blue;
+        blue.palette.emplace('x', pixelstatus::Rgb{0U, 0U, 255U});
+        blue.pixels = {"xx", "xx"};
+        pixelstatus::CardConfig second;
+        second.id = "second";
+        second.hold = 1s;
+        second.content = blue;
+
+        config.cards = {std::move(first), std::move(second)};
+        pixelstatus::Frame frame(2U, 2U);
+        const pixelstatus::Renderer renderer(origin);
+        const auto report = renderer.render(
+            states, config, origin + 1500ms, wall, frame);
+        CHECK(report.success);
+        CHECK(report.transitioning);
+        CHECK(*frame.pixel(0U, 0U) == expected_top_left);
+        CHECK(*frame.pixel(1U, 1U) == expected_bottom_right);
+    };
+
+    check_transition(
+        pixelstatus::CardTransition::slide_right,
+        {0U, 0U, 255U},
+        {255U, 0U, 0U});
+    check_transition(
+        pixelstatus::CardTransition::slide_up,
+        {255U, 0U, 0U},
+        {0U, 0U, 255U});
+    check_transition(
+        pixelstatus::CardTransition::slide_down,
+        {0U, 0U, 255U},
+        {255U, 0U, 0U});
+}
+
+void test_clock_card_renderer() {
+    const auto origin = pixelstatus::TimePoint{};
+    pixelstatus::AppConfig config;
+    config.display = {16U, 16U, {1U, 2U, 3U}};
+    pixelstatus::ClockCardConfig clock;
+    clock.local_color = {0U, 160U, 255U};
+    clock.utc_color = {255U, 214U, 0U};
+    pixelstatus::CardConfig card;
+    card.id = "clock";
+    card.hold = 1s;
+    card.content = clock;
+    config.cards.push_back(card);
+
+    pixelstatus::StateStore states;
+    pixelstatus::Frame frame(16U, 16U);
+    const pixelstatus::Renderer renderer(origin);
+    const auto report = renderer.render(
+        states,
+        config,
+        origin,
+        std::chrono::system_clock::time_point{},
+        frame);
+    CHECK(report.success);
+    CHECK(report.active_card == "clock");
+    CHECK((*frame.pixel(0U, 9U) == pixelstatus::Rgb{255U, 214U, 0U}));
+    CHECK((*frame.pixel(7U, 11U) == pixelstatus::Rgb{255U, 214U, 0U}));
+    CHECK((*frame.pixel(6U, 9U) == pixelstatus::Rgb{1U, 2U, 3U}));
+}
+
 void test_mi_protocol_vectors() {
     const auto pixel_zero = pixelstatus::mi::build_pixel_packet(0, {255, 0, 0});
     const pixelstatus::mi::PixelPacket expected_zero{
@@ -236,6 +386,36 @@ void test_sample_configuration() {
         CHECK((statuses.at("fade_demo").sample(1000ms)
             == pixelstatus::Rgb{0x00, 0xA0, 0xFF}));
     }
+}
+
+void test_card_deck_configuration() {
+    const auto path = std::filesystem::path(PIXELSTATUS_TEST_DATA_DIR)
+        / "card-deck.example.json";
+    const auto loaded = pixelstatus::load_config_file(path);
+    if (!loaded) {
+        for (const auto& error : loaded.errors) {
+            std::cerr << "card deck config error: " << error << '\n';
+        }
+    }
+    CHECK(loaded);
+    CHECK(loaded.config && loaded.config->cards.size() == 4U);
+    CHECK(loaded.config && loaded.config->monitors.size() == 6U);
+    if (!loaded.config || loaded.config->cards.size() != 4U) {
+        return;
+    }
+    CHECK(loaded.config->indicators.empty());
+    CHECK(loaded.config->cards[0].id == "logo");
+    CHECK(std::holds_alternative<pixelstatus::BitmapCardConfig>(
+        loaded.config->cards[0].content));
+    CHECK(loaded.config->cards[1].id == "clock");
+    CHECK(std::holds_alternative<pixelstatus::ClockCardConfig>(
+        loaded.config->cards[1].content));
+    CHECK(loaded.config->cards[1].transition.type
+          == pixelstatus::CardTransition::slide_left);
+    CHECK(std::holds_alternative<pixelstatus::IndicatorCardConfig>(
+        loaded.config->cards[2].content));
+    CHECK(loaded.config->cards[3].transition.type
+          == pixelstatus::CardTransition::instant);
 }
 
 void test_http_monitor_configuration() {
@@ -1035,6 +1215,34 @@ void test_configuration_rejects_unknown_fields() {
     CHECK(!loaded.errors.empty());
 }
 
+void test_configuration_rejects_invalid_card_deck() {
+    const auto path = std::filesystem::temp_directory_path()
+        / "pixelstatus-nx-invalid-card-deck-test.json";
+    {
+        std::ofstream output(path, std::ios::binary | std::ios::trunc);
+        output << R"({
+            "schema_version": 1,
+            "display": {"width": 14, "height": 15},
+            "statuses": {
+                "unknown": {"appearance": {"solid": "#000000"}},
+                "stale": {"appearance": {"solid": "#000000"}}
+            },
+            "cards": [
+                {"id": "clock", "type": "clock", "hold": "1s"}
+            ]
+        })";
+    }
+
+    const auto loaded = pixelstatus::load_config_file(path);
+    std::error_code ignored;
+    std::filesystem::remove(path, ignored);
+    CHECK(!loaded);
+    CHECK(std::any_of(
+        loaded.errors.begin(), loaded.errors.end(), [](const auto& error) {
+            return error.find("at least 15x15") != std::string::npos;
+        }));
+}
+
 #ifdef PIXELSTATUS_TEST_HOST_HTTP
 
 struct BlockingRunnerProbe {
@@ -1819,14 +2027,19 @@ int main() {
     test_appearance_sampling();
     test_state_freshness_and_epoch();
     test_renderer();
+    test_card_deck_renderer();
+    test_card_deck_slide_directions();
+    test_clock_card_renderer();
     test_mi_protocol_vectors();
     test_sample_configuration();
+    test_card_deck_configuration();
     test_http_monitor_configuration();
     test_http_request_configuration();
     test_tcp_connect_monitor_configuration();
     test_dns_monitor_configuration();
     test_tcp_exchange_monitor_configuration();
     test_configuration_rejects_unknown_fields();
+    test_configuration_rejects_invalid_card_deck();
     test_configuration_rejects_invalid_identifiers();
     test_configuration_rejects_invalid_monitor();
     test_configuration_rejects_invalid_tcp_monitor();

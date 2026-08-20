@@ -39,6 +39,10 @@ and lookup-latency observations without changing those contracts.
 The same rendered framebuffer is also available through a responsive
 [Browser Display Backend](docs/http-display.md), including a read-only frame API and
 headless host mode.
+The renderer can cycle bitmap, two-line local/UTC clock, and live indicator cards
+through instant, fade, or four-direction slide transitions. See
+[Card Decks](docs/card-decks.md) and the runnable
+[`card-deck.example.json`](examples/card-deck.example.json).
 The implemented WinHTTP/Schannel desktop TLS path, planned ESP32 TLS path, named
 secret handling, and integration requirements for TrueNAS CORE, UniFi, Netgear
 cable modems, and Starlink are described in

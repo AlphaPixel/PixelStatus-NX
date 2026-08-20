@@ -27,6 +27,7 @@
 #include <string_view>
 #include <thread>
 #include <unordered_set>
+#include <variant>
 #include <vector>
 
 namespace {
@@ -44,6 +45,18 @@ std::vector<std::string> unique_sources(const pixelstatus::AppConfig& config) {
     for (const auto& indicator : config.indicators) {
         if (seen.insert(indicator.source).second) {
             sources.push_back(indicator.source);
+        }
+    }
+    for (const auto& card : config.cards) {
+        const auto* content =
+            std::get_if<pixelstatus::IndicatorCardConfig>(&card.content);
+        if (content == nullptr) {
+            continue;
+        }
+        for (const auto& indicator : content->indicators) {
+            if (seen.insert(indicator.source).second) {
+                sources.push_back(indicator.source);
+            }
         }
     }
     return sources;
@@ -344,8 +357,12 @@ int main(int argc, char** argv) {
     auto next_transition = started_at + 4s;
     bool first_source_failed = false;
 
-    std::cout << "Loaded " << options->config_path << '\n'
-              << "The final region becomes stale after six seconds.\n";
+    std::cout << "Loaded " << options->config_path << '\n';
+    if (config.cards.empty()) {
+        std::cout << "The final region becomes stale after six seconds.\n";
+    } else {
+        std::cout << "Configured display cards: " << config.cards.size() << '\n';
+    }
     if (display) {
         std::cout << "Close the simulator window to exit.\n";
     } else {

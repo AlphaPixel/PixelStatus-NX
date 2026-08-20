@@ -46,6 +46,7 @@ adds these shared entries to the **Startup Item** dropdown:
 | `Simulator - HTTP Monitor (Native + Browser)` | HTTP/JSON monitor example with both outputs | Status API `18817`, browser `18818` |
 | `Simulator - HTTP Request Monitor` | Authenticated JSON POST with custom headers and body | Status API `18877`, browser `18878` |
 | `Simulator - HTTPS Monitor` | Public HTTPS system-trust check | Status API `18887`, browser `18888` |
+| `Simulator - Card Deck (Real Monitors)` | Logo, local/UTC clock, LAN/WAN, and public-server cards | Status API `18897`, browser `18898` |
 | `Simulator - Concurrent HTTP Monitors` | Headless two-monitor slow/fast concurrency example | Status API `18837`, browser `18838` |
 | `Simulator - TCP Connect Monitor` | Headless TCP-connect latency example | Status API `18847`, browser `18848` |
 | `Simulator - DNS Monitor` | Headless localhost IPv4 resolution example | Status API `18857`, browser `18858` |
@@ -106,6 +107,14 @@ WinHTTP/Schannel handshake through the system trust store:
 
 ```powershell
 .\tools\test-https-monitor.ps1
+```
+
+The card-deck smoke test runs the browser backend, confirms that the frame advances
+away from the bitmap logo, and waits for both the localhost DNS and public HTTPS
+monitors to report healthy states:
+
+```powershell
+.\tools\test-card-deck.ps1
 ```
 
 The browser-display smoke test runs the renderer headlessly and verifies its HTML,
@@ -260,7 +269,8 @@ address resolution is shown in
 
 The simulator supports:
 
-- four rectangular indicators on a 16x16 logical display;
+- legacy fixed layouts or timed decks of bitmap, clock, and indicator cards;
+- instant, fade, and four-direction slide transitions between cards;
 - solid, blink, toggle, fade, pulse, sequence, and color-cycle appearances;
 - a periodic status transition;
 - TTL expiration into the distinct `stale` status;

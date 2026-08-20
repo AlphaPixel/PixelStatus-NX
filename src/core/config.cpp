@@ -22,6 +22,8 @@ constexpr std::size_t maximum_config_bytes = 1024U * 1024U;
 constexpr std::size_t maximum_dimension = 256U;
 constexpr std::size_t maximum_pixels = 65'536U;
 constexpr std::size_t maximum_indicators = 1'024U;
+constexpr std::size_t maximum_cards = 32U;
+constexpr std::size_t maximum_bitmap_palette_entries = 32U;
 constexpr std::size_t maximum_statuses = 256U;
 constexpr std::size_t maximum_monitors = 256U;
 constexpr Duration maximum_appearance_duration = std::chrono::hours(24);
@@ -29,6 +31,9 @@ constexpr Duration minimum_monitor_interval = std::chrono::seconds(1);
 constexpr Duration maximum_monitor_interval = std::chrono::hours(24);
 constexpr Duration maximum_monitor_ttl = std::chrono::hours(24 * 7);
 constexpr Duration maximum_monitor_timeout = std::chrono::seconds(30);
+constexpr Duration minimum_card_hold = std::chrono::seconds(1);
+constexpr Duration maximum_card_hold = std::chrono::hours(24);
+constexpr Duration maximum_card_transition = std::chrono::seconds(10);
 constexpr std::size_t maximum_monitor_rules = 32U;
 constexpr std::size_t maximum_monitor_response_bytes = 64U * 1024U;
 constexpr std::size_t maximum_url_bytes = 2U * 1024U;
@@ -1383,6 +1388,298 @@ struct ParsedSteps {
     return config;
 }
 
+[[nodiscard]] std::optional<IndicatorConfig> parse_indicator_config(
+    const Json& item,
+    std::string_view path,
+    const DisplayConfig& display,
+    ConfigLoadResult& result) {
+    if (!item.is_object()) {
+        add_error(result, std::string(path) + " must be an object");
+        return std::nullopt;
+    }
+    reject_unknown_fields(
+        item,
+        {"id", "source", "x", "y", "width", "height"},
+        path,
+        result);
+
+    const auto id = required_identifier(item, "id", path, result);
+    const auto source = required_identifier(item, "source", path, result);
+    const auto x = bounded_size(item, "x", path, 0, maximum_dimension, result);
+    const auto y = bounded_size(item, "y", path, 0, maximum_dimension, result);
+    const auto width = bounded_size(item, "width", path, 1, maximum_dimension, result);
+    const auto height = bounded_size(item, "height", path, 1, maximum_dimension, result);
+    if (!id || !source || !x || !y || !width || !height) {
+        return std::nullopt;
+    }
+    if (*x >= display.width || *width > display.width - *x
+        || *y >= display.height || *height > display.height - *y) {
+        add_error(result, std::string(path) + " extends outside the configured display");
+        return std::nullopt;
+    }
+    return IndicatorConfig{*id, *source, *x, *y, *width, *height};
+}
+
+[[nodiscard]] std::optional<CardTransitionConfig> parse_card_transition(
+    const Json& card,
+    std::string_view path,
+    ConfigLoadResult& result) {
+    CardTransitionConfig transition;
+    const auto field = card.find("transition");
+    if (field == card.end()) {
+        return transition;
+    }
+    const auto transition_path = std::string(path) + ".transition";
+    if (!field->is_object()) {
+        add_error(result, transition_path + " must be an object");
+        return std::nullopt;
+    }
+    reject_unknown_fields(*field, {"type", "duration"}, transition_path, result);
+    const auto type = required_string(*field, "type", transition_path, result);
+    if (!type) {
+        return std::nullopt;
+    }
+    if (*type == "instant") {
+        if (field->contains("duration")) {
+            add_error(result, transition_path + ".duration is not allowed for instant");
+            return std::nullopt;
+        }
+        return transition;
+    }
+    if (*type == "fade") {
+        transition.type = CardTransition::fade;
+    } else if (*type == "slide_left") {
+        transition.type = CardTransition::slide_left;
+    } else if (*type == "slide_right") {
+        transition.type = CardTransition::slide_right;
+    } else if (*type == "slide_up") {
+        transition.type = CardTransition::slide_up;
+    } else if (*type == "slide_down") {
+        transition.type = CardTransition::slide_down;
+    } else {
+        add_error(
+            result,
+            transition_path
+                + ".type must be instant, fade, slide_left, slide_right, slide_up, or slide_down");
+        return std::nullopt;
+    }
+    const auto duration = field->find("duration");
+    if (duration == field->end()) {
+        add_error(result, transition_path + ".duration is required");
+        return std::nullopt;
+    }
+    const auto parsed = bounded_duration_value(
+        *duration,
+        transition_path + ".duration",
+        Duration{1},
+        maximum_card_transition,
+        result);
+    if (!parsed) {
+        return std::nullopt;
+    }
+    transition.duration = *parsed;
+    return transition;
+}
+
+[[nodiscard]] std::optional<CardConfig> parse_card(
+    const Json& item,
+    std::string_view path,
+    const DisplayConfig& display,
+    ConfigLoadResult& result) {
+    if (!item.is_object()) {
+        add_error(result, std::string(path) + " must be an object");
+        return std::nullopt;
+    }
+    const auto id = required_identifier(item, "id", path, result);
+    const auto type = required_string(item, "type", path, result);
+    const auto hold_field = item.find("hold");
+    if (hold_field == item.end()) {
+        add_error(result, std::string(path) + ".hold is required");
+    }
+    const auto hold = hold_field == item.end()
+        ? std::optional<Duration>{}
+        : bounded_duration_value(
+            *hold_field,
+            std::string(path) + ".hold",
+            minimum_card_hold,
+            maximum_card_hold,
+            result);
+    const auto transition = parse_card_transition(item, path, result);
+    if (!id || !type || !hold || !transition) {
+        return std::nullopt;
+    }
+
+    CardConfig card;
+    card.id = *id;
+    card.hold = *hold;
+    card.transition = *transition;
+    if (*type == "bitmap") {
+        reject_unknown_fields(
+            item,
+            {"id", "type", "hold", "transition", "palette", "pixels"},
+            path,
+            result);
+        const auto palette = item.find("palette");
+        const auto pixels = item.find("pixels");
+        if (palette == item.end() || !palette->is_object() || palette->empty()
+            || palette->size() > maximum_bitmap_palette_entries) {
+            add_error(
+                result,
+                std::string(path) + ".palette must contain between 1 and 32 entries");
+            return std::nullopt;
+        }
+        BitmapCardConfig bitmap;
+        bool valid = true;
+        for (auto entry = palette->begin(); entry != palette->end(); ++entry) {
+            if (entry.key().size() != 1U
+                || static_cast<unsigned char>(entry.key().front()) < 0x20U
+                || static_cast<unsigned char>(entry.key().front()) > 0x7EU) {
+                add_error(
+                    result,
+                    std::string(path)
+                        + ".palette keys must be one printable ASCII character");
+                valid = false;
+                continue;
+            }
+            const auto color = color_value(
+                entry.value(),
+                std::string(path) + ".palette." + entry.key(),
+                result);
+            if (color) {
+                bitmap.palette.emplace(entry.key().front(), *color);
+            } else {
+                valid = false;
+            }
+        }
+        if (pixels == item.end() || !pixels->is_array()
+            || pixels->size() != display.height) {
+            add_error(
+                result,
+                std::string(path) + ".pixels must contain exactly "
+                    + std::to_string(display.height) + " rows");
+            return std::nullopt;
+        }
+        for (std::size_t row = 0; row < pixels->size(); ++row) {
+            const auto row_path =
+                std::string(path) + ".pixels[" + std::to_string(row) + "]";
+            if (!(*pixels)[row].is_string()) {
+                add_error(result, row_path + " must be a string");
+                valid = false;
+                continue;
+            }
+            const auto value = (*pixels)[row].get<std::string>();
+            if (value.size() != display.width) {
+                add_error(
+                    result,
+                    row_path + " must contain exactly "
+                        + std::to_string(display.width) + " palette characters");
+                valid = false;
+                continue;
+            }
+            if (std::any_of(value.begin(), value.end(), [&bitmap](char character) {
+                    return !bitmap.palette.contains(character);
+                })) {
+                add_error(result, row_path + " uses a character missing from palette");
+                valid = false;
+            }
+            bitmap.pixels.push_back(value);
+        }
+        if (!valid) {
+            return std::nullopt;
+        }
+        card.content = std::move(bitmap);
+        return card;
+    }
+
+    if (*type == "clock") {
+        reject_unknown_fields(
+            item,
+            {"id", "type", "hold", "transition", "local_color", "utc_color"},
+            path,
+            result);
+        if (display.width < 15U || display.height < 15U) {
+            add_error(
+                result,
+                std::string(path) + " requires a display of at least 15x15 pixels");
+            return std::nullopt;
+        }
+        ClockCardConfig clock;
+        bool valid = true;
+        if (const auto field = item.find("local_color"); field != item.end()) {
+            if (const auto color = color_value(
+                    *field, std::string(path) + ".local_color", result)) {
+                clock.local_color = *color;
+            } else {
+                valid = false;
+            }
+        }
+        if (const auto field = item.find("utc_color"); field != item.end()) {
+            if (const auto color = color_value(
+                    *field, std::string(path) + ".utc_color", result)) {
+                clock.utc_color = *color;
+            } else {
+                valid = false;
+            }
+        }
+        if (!valid) {
+            return std::nullopt;
+        }
+        card.content = clock;
+        return card;
+    }
+
+    if (*type == "indicators") {
+        reject_unknown_fields(
+            item,
+            {"id", "type", "hold", "transition", "indicators"},
+            path,
+            result);
+        const auto indicators = item.find("indicators");
+        if (indicators == item.end() || !indicators->is_array()
+            || indicators->empty() || indicators->size() > maximum_indicators) {
+            add_error(
+                result,
+                std::string(path)
+                    + ".indicators must contain between 1 and 1024 entries");
+            return std::nullopt;
+        }
+        IndicatorCardConfig content;
+        std::unordered_set<std::string> ids;
+        for (std::size_t index = 0; index < indicators->size(); ++index) {
+            const auto indicator_path = std::string(path) + ".indicators["
+                + std::to_string(index) + "]";
+            auto indicator = parse_indicator_config(
+                (*indicators)[index], indicator_path, display, result);
+            if (!indicator) {
+                continue;
+            }
+            if (!ids.insert(indicator->id).second) {
+                add_error(
+                    result,
+                    indicator_path + ".id duplicates an earlier indicator on this card");
+                continue;
+            }
+            content.indicators.push_back(std::move(*indicator));
+        }
+        if (content.indicators.size() != indicators->size()) {
+            return std::nullopt;
+        }
+        card.content = std::move(content);
+        return card;
+    }
+
+    reject_unknown_fields(
+        item,
+        {
+            "id", "type", "hold", "transition", "palette", "pixels",
+            "local_color", "utc_color", "indicators",
+        },
+        path,
+        result);
+    add_error(result, std::string(path) + ".type must be bitmap, clock, or indicators");
+    return std::nullopt;
+}
+
 }  // namespace
 
 std::optional<Duration> parse_duration(std::string_view value) {
@@ -1450,7 +1747,7 @@ ConfigLoadResult load_config_file(const std::filesystem::path& path) {
     try {
         reject_unknown_fields(
             root,
-            {"schema_version", "display", "statuses", "monitors", "indicators"},
+            {"schema_version", "display", "statuses", "monitors", "indicators", "cards"},
             "configuration",
             result);
         const auto schema = root.find("schema_version");
@@ -1540,52 +1837,59 @@ ConfigLoadResult load_config_file(const std::filesystem::path& path) {
         }
 
         const auto indicators = root.find("indicators");
-        if (indicators == root.end() || !indicators->is_array() || indicators->empty()) {
+        const auto cards = root.find("cards");
+        if ((indicators == root.end()) == (cards == root.end())) {
+            add_error(result, "configuration must define exactly one of indicators or cards");
+        } else if (indicators != root.end()
+            && (!indicators->is_array() || indicators->empty())) {
             add_error(result, "indicators must be a non-empty array");
-        } else if (indicators->size() > maximum_indicators) {
+        } else if (indicators != root.end()
+            && indicators->size() > maximum_indicators) {
             add_error(result, "indicators exceeds the limit of 1024 entries");
-        } else {
+        } else if (indicators != root.end()) {
             std::unordered_set<std::string> ids;
             for (std::size_t index = 0; index < indicators->size(); ++index) {
-                const auto& item = (*indicators)[index];
                 const auto path_text = std::string("indicators[") + std::to_string(index) + "]";
-                if (!item.is_object()) {
-                    add_error(result, path_text + " must be an object");
+                auto indicator = parse_indicator_config(
+                    (*indicators)[index], path_text, config.display, result);
+                if (!indicator) {
                     continue;
                 }
-                reject_unknown_fields(
-                    item,
-                    {"id", "source", "x", "y", "width", "height"},
-                    path_text,
-                    result);
-
-                IndicatorConfig indicator;
-                const auto id = required_identifier(item, "id", path_text, result);
-                const auto source = required_identifier(item, "source", path_text, result);
-                const auto x = bounded_size(item, "x", path_text, 0, maximum_dimension, result);
-                const auto y = bounded_size(item, "y", path_text, 0, maximum_dimension, result);
-                const auto width = bounded_size(item, "width", path_text, 1, maximum_dimension, result);
-                const auto height = bounded_size(item, "height", path_text, 1, maximum_dimension, result);
-                if (!id || !source || !x || !y || !width || !height) {
-                    continue;
-                }
-                if (!ids.insert(*id).second) {
+                if (!ids.insert(indicator->id).second) {
                     add_error(result, path_text + ".id duplicates an earlier indicator");
                     continue;
                 }
-                if (*x >= config.display.width || *width > config.display.width - *x
-                    || *y >= config.display.height || *height > config.display.height - *y) {
-                    add_error(result, path_text + " extends outside the configured display");
+                config.indicators.push_back(std::move(*indicator));
+            }
+        } else if (!cards->is_array() || cards->empty()
+            || cards->size() > maximum_cards) {
+            add_error(result, "cards must be an array with between 1 and 32 entries");
+        } else {
+            std::unordered_set<std::string> ids;
+            std::size_t total_indicators{};
+            for (std::size_t index = 0; index < cards->size(); ++index) {
+                const auto path_text =
+                    std::string("cards[") + std::to_string(index) + "]";
+                auto card = parse_card(
+                    (*cards)[index], path_text, config.display, result);
+                if (!card) {
                     continue;
                 }
-
-                indicator.id = *id;
-                indicator.source = *source;
-                indicator.x = *x;
-                indicator.y = *y;
-                indicator.width = *width;
-                indicator.height = *height;
-                config.indicators.push_back(std::move(indicator));
+                if (!ids.insert(card->id).second) {
+                    add_error(result, path_text + ".id duplicates an earlier card");
+                    continue;
+                }
+                if (const auto* content =
+                        std::get_if<IndicatorCardConfig>(&card->content)) {
+                    total_indicators += content->indicators.size();
+                    if (total_indicators > maximum_indicators) {
+                        add_error(
+                            result,
+                            "cards contain more than 1024 indicators in total");
+                        continue;
+                    }
+                }
+                config.cards.push_back(std::move(*card));
             }
         }
     } catch (const std::exception& error) {

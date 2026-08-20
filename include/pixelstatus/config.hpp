@@ -30,6 +30,46 @@ struct IndicatorConfig {
     std::size_t height{1};
 };
 
+enum class CardTransition {
+    instant,
+    fade,
+    slide_left,
+    slide_right,
+    slide_up,
+    slide_down,
+};
+
+struct CardTransitionConfig {
+    CardTransition type{CardTransition::instant};
+    Duration duration{};
+};
+
+struct BitmapCardConfig {
+    std::unordered_map<char, Rgb> palette;
+    std::vector<std::string> pixels;
+};
+
+struct ClockCardConfig {
+    Rgb local_color{0x00, 0xB0, 0xFF};
+    Rgb utc_color{0xFF, 0xD6, 0x00};
+};
+
+struct IndicatorCardConfig {
+    std::vector<IndicatorConfig> indicators;
+};
+
+using CardContentConfig = std::variant<
+    BitmapCardConfig,
+    ClockCardConfig,
+    IndicatorCardConfig>;
+
+struct CardConfig {
+    std::string id;
+    Duration hold{std::chrono::seconds(5)};
+    CardTransitionConfig transition;
+    CardContentConfig content;
+};
+
 enum class HttpObservation {
     status_code,
     body,
@@ -121,6 +161,7 @@ struct AppConfig {
     std::unordered_map<std::string, TimelineAppearance> statuses;
     std::vector<PullMonitorConfig> monitors;
     std::vector<IndicatorConfig> indicators;
+    std::vector<CardConfig> cards;
 };
 
 struct ConfigLoadResult {

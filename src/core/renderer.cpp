@@ -1,27 +1,50 @@
 #include "pixelstatus/renderer.hpp"
 
+#include <algorithm>
+#include <array>
 #include <chrono>
+#include <cstdint>
+#include <ctime>
+#include <variant>
 
 namespace pixelstatus {
+namespace {
 
-Renderer::Renderer(TimePoint animation_origin) : animation_origin_(animation_origin) {}
+constexpr std::array<std::array<std::uint8_t, 7U>, 10U> digit_glyphs{{
+    {{0b111, 0b101, 0b101, 0b101, 0b101, 0b101, 0b111}},
+    {{0b010, 0b110, 0b010, 0b010, 0b010, 0b010, 0b111}},
+    {{0b111, 0b001, 0b001, 0b111, 0b100, 0b100, 0b111}},
+    {{0b111, 0b001, 0b001, 0b111, 0b001, 0b001, 0b111}},
+    {{0b101, 0b101, 0b101, 0b111, 0b001, 0b001, 0b001}},
+    {{0b111, 0b100, 0b100, 0b111, 0b001, 0b001, 0b111}},
+    {{0b111, 0b100, 0b100, 0b111, 0b101, 0b101, 0b111}},
+    {{0b111, 0b001, 0b001, 0b010, 0b010, 0b010, 0b010}},
+    {{0b111, 0b101, 0b101, 0b111, 0b101, 0b101, 0b111}},
+    {{0b111, 0b101, 0b101, 0b111, 0b001, 0b001, 0b111}},
+}};
 
-RenderReport Renderer::render(
+void merge_report(RenderReport& target, const RenderReport& source) {
+    target.rendered_indicators += source.rendered_indicators;
+    target.missing_sources += source.missing_sources;
+    target.missing_statuses += source.missing_statuses;
+    if (!source.success && target.error.empty()) {
+        target.error = source.error;
+    }
+}
+
+RenderReport render_indicators(
     const StateStore& states,
     const AppConfig& config,
+    const std::vector<IndicatorConfig>& indicators,
     TimePoint now,
-    Frame& output) const {
+    TimePoint animation_origin,
+    Frame& output) {
     RenderReport report;
-    if (output.width() != config.display.width || output.height() != config.display.height) {
-        report.error = "Output frame dimensions do not match display configuration";
-        return report;
-    }
-
     output.fill(config.display.background);
-    for (const auto& indicator : config.indicators) {
+    for (const auto& indicator : indicators) {
         const auto resolved = states.resolve(indicator.source, now);
         std::string status = "unknown";
-        auto entered_at = animation_origin_;
+        auto entered_at = animation_origin;
         if (resolved) {
             status = resolved->effective_status;
             entered_at = resolved->status_entered_at;
@@ -54,8 +77,287 @@ RenderReport Renderer::render(
         }
         ++report.rendered_indicators;
     }
-
     report.success = true;
+    return report;
+}
+
+void draw_digit(
+    Frame& output,
+    std::size_t x,
+    std::size_t y,
+    unsigned int digit,
+    Rgb color) {
+    const auto& glyph = digit_glyphs[digit];
+    for (std::size_t row = 0; row < glyph.size(); ++row) {
+        for (std::size_t column = 0; column < 3U; ++column) {
+            if ((glyph[row] & (1U << (2U - column))) != 0U) {
+                static_cast<void>(output.set_pixel(x + column, y + row, color));
+            }
+        }
+    }
+}
+
+void draw_time(
+    Frame& output,
+    std::size_t y,
+    int hour,
+    int minute,
+    bool show_colon,
+    Rgb color) {
+    const auto x = (output.width() - 15U) / 2U;
+    draw_digit(output, x, y, static_cast<unsigned int>(hour / 10), color);
+    draw_digit(output, x + 3U, y, static_cast<unsigned int>(hour % 10), color);
+    if (show_colon) {
+        static_cast<void>(output.set_pixel(x + 7U, y + 2U, color));
+        static_cast<void>(output.set_pixel(x + 7U, y + 4U, color));
+    }
+    draw_digit(output, x + 9U, y, static_cast<unsigned int>(minute / 10), color);
+    draw_digit(output, x + 12U, y, static_cast<unsigned int>(minute % 10), color);
+}
+
+bool split_wall_time(
+    std::chrono::system_clock::time_point wall_now,
+    std::tm& local,
+    std::tm& utc) {
+    const auto raw = std::chrono::system_clock::to_time_t(wall_now);
+#ifdef _WIN32
+    return localtime_s(&local, &raw) == 0 && gmtime_s(&utc, &raw) == 0;
+#else
+    return localtime_r(&raw, &local) != nullptr
+        && gmtime_r(&raw, &utc) != nullptr;
+#endif
+}
+
+RenderReport render_card(
+    const StateStore& states,
+    const AppConfig& config,
+    const CardConfig& card,
+    TimePoint now,
+    TimePoint animation_origin,
+    std::chrono::system_clock::time_point wall_now,
+    Frame& output) {
+    if (const auto* indicators = std::get_if<IndicatorCardConfig>(&card.content)) {
+        return render_indicators(
+            states,
+            config,
+            indicators->indicators,
+            now,
+            animation_origin,
+            output);
+    }
+
+    RenderReport report;
+    output.fill(config.display.background);
+    if (const auto* bitmap = std::get_if<BitmapCardConfig>(&card.content)) {
+        for (std::size_t y = 0; y < bitmap->pixels.size(); ++y) {
+            for (std::size_t x = 0; x < bitmap->pixels[y].size(); ++x) {
+                const auto color = bitmap->palette.find(bitmap->pixels[y][x]);
+                if (color == bitmap->palette.end()
+                    || !output.set_pixel(x, y, color->second)) {
+                    report.error = "Bitmap card became invalid during rendering";
+                    return report;
+                }
+            }
+        }
+        report.success = true;
+        return report;
+    }
+
+    const auto* clock = std::get_if<ClockCardConfig>(&card.content);
+    std::tm local{};
+    std::tm utc{};
+    if (clock == nullptr || !split_wall_time(wall_now, local, utc)) {
+        report.error = "Clock card could not convert the current wall time";
+        return report;
+    }
+    const auto show_colon = local.tm_sec % 2 == 0;
+    draw_time(
+        output, 0U, local.tm_hour, local.tm_min, show_colon, clock->local_color);
+    draw_time(
+        output,
+        output.height() - 7U,
+        utc.tm_hour,
+        utc.tm_min,
+        show_colon,
+        clock->utc_color);
+    report.success = true;
+    return report;
+}
+
+void compose_transition(
+    const Frame& from,
+    const Frame& to,
+    CardTransition transition,
+    double progress,
+    Frame& output) {
+    const auto width = output.width();
+    const auto height = output.height();
+    if (transition == CardTransition::fade) {
+        for (std::size_t y = 0; y < height; ++y) {
+            for (std::size_t x = 0; x < width; ++x) {
+                static_cast<void>(output.set_pixel(
+                    x,
+                    y,
+                    interpolate(*from.pixel(x, y), *to.pixel(x, y), progress)));
+            }
+        }
+        return;
+    }
+
+    const auto horizontal = transition == CardTransition::slide_left
+        || transition == CardTransition::slide_right;
+    const auto extent = horizontal ? width : height;
+    const auto offset = (std::min)(
+        extent,
+        static_cast<std::size_t>(progress * static_cast<double>(extent)));
+    for (std::size_t y = 0; y < height; ++y) {
+        for (std::size_t x = 0; x < width; ++x) {
+            const Rgb* color{};
+            if (transition == CardTransition::slide_left) {
+                const auto source = x + offset;
+                color = source < width
+                    ? from.pixel(source, y)
+                    : to.pixel(source - width, y);
+            } else if (transition == CardTransition::slide_right) {
+                color = x >= offset
+                    ? from.pixel(x - offset, y)
+                    : to.pixel(width - offset + x, y);
+            } else if (transition == CardTransition::slide_up) {
+                const auto source = y + offset;
+                color = source < height
+                    ? from.pixel(x, source)
+                    : to.pixel(x, source - height);
+            } else {
+                color = y >= offset
+                    ? from.pixel(x, y - offset)
+                    : to.pixel(x, height - offset + y);
+            }
+            static_cast<void>(output.set_pixel(x, y, *color));
+        }
+    }
+}
+
+}  // namespace
+
+Renderer::Renderer(TimePoint animation_origin) : animation_origin_(animation_origin) {}
+
+RenderReport Renderer::render(
+    const StateStore& states,
+    const AppConfig& config,
+    TimePoint now,
+    Frame& output) const {
+    return render(
+        states,
+        config,
+        now,
+        std::chrono::system_clock::now(),
+        output);
+}
+
+RenderReport Renderer::render(
+    const StateStore& states,
+    const AppConfig& config,
+    TimePoint now,
+    std::chrono::system_clock::time_point wall_now,
+    Frame& output) const {
+    RenderReport report;
+    if (output.width() != config.display.width
+        || output.height() != config.display.height) {
+        report.error = "Output frame dimensions do not match display configuration";
+        return report;
+    }
+    if (config.cards.empty()) {
+        return render_indicators(
+            states,
+            config,
+            config.indicators,
+            now,
+            animation_origin_,
+            output);
+    }
+
+    if (config.cards.size() == 1U) {
+        report = render_card(
+            states,
+            config,
+            config.cards.front(),
+            now,
+            animation_origin_,
+            wall_now,
+            output);
+        report.active_card = config.cards.front().id;
+        return report;
+    }
+
+    Duration cycle{};
+    for (const auto& card : config.cards) {
+        cycle += card.hold + card.transition.duration;
+    }
+    auto elapsed = std::chrono::duration_cast<Duration>(now - animation_origin_);
+    if (elapsed < Duration::zero()) {
+        elapsed = Duration::zero();
+    }
+    auto position = Duration{elapsed.count() % cycle.count()};
+    std::size_t active_index{};
+    for (; active_index + 1U < config.cards.size(); ++active_index) {
+        const auto segment = config.cards[active_index].hold
+            + config.cards[active_index].transition.duration;
+        if (position < segment) {
+            break;
+        }
+        position -= segment;
+    }
+
+    const auto& active = config.cards[active_index];
+    report.active_card = active.id;
+    if (position < active.hold
+        || active.transition.duration == Duration::zero()
+        || active.transition.type == CardTransition::instant) {
+        auto rendered = render_card(
+            states,
+            config,
+            active,
+            now,
+            animation_origin_,
+            wall_now,
+            output);
+        rendered.active_card = active.id;
+        return rendered;
+    }
+
+    const auto next_index = (active_index + 1U) % config.cards.size();
+    const auto& next = config.cards[next_index];
+    Frame from(config.display.width, config.display.height);
+    Frame to(config.display.width, config.display.height);
+    const auto from_report = render_card(
+        states,
+        config,
+        active,
+        now,
+        animation_origin_,
+        wall_now,
+        from);
+    const auto to_report = render_card(
+        states,
+        config,
+        next,
+        now,
+        animation_origin_,
+        wall_now,
+        to);
+    merge_report(report, from_report);
+    merge_report(report, to_report);
+    if (!report.error.empty()) {
+        return report;
+    }
+    const auto transition_elapsed = position - active.hold;
+    const auto progress = static_cast<double>(transition_elapsed.count())
+        / static_cast<double>(active.transition.duration.count());
+    compose_transition(from, to, active.transition.type, progress, output);
+    report.success = true;
+    report.active_card = active.id;
+    report.next_card = next.id;
+    report.transitioning = true;
     return report;
 }
 

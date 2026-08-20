@@ -190,6 +190,24 @@
       ]
     },
     {
+      "name": "Simulator - Card Deck (Real Monitors)",
+      "projectTarget": "pixelstatus_simulator.exe (Debug\\pixelstatus_simulator.exe)",
+      "program": "${cmake.binaryDir}/Debug/pixelstatus_simulator.exe",
+      "args": [
+        "${workspaceRoot}/examples/card-deck.example.json",
+        "--api-token",
+        "pixelstatus-vs-debug",
+        "--api-port",
+        "18897",
+        "--web-display-port",
+        "18898",
+        "--web-refresh-ms",
+        "33",
+        "--monitor-workers",
+        "4"
+      ]
+    },
+    {
       "name": "Simulator - Timed Browser Smoke (10 seconds)",
       "projectTarget": "pixelstatus_simulator.exe (Debug\\pixelstatus_simulator.exe)",
       "program": "${cmake.binaryDir}/Debug/pixelstatus_simulator.exe",

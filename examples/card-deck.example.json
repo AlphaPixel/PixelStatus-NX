@@ -1,0 +1,324 @@
+{
+  "schema_version": 1,
+  "display": {
+    "width": 16,
+    "height": 16,
+    "background": "#02050A"
+  },
+  "statuses": {
+    "ok": {
+      "appearance": {
+        "solid": "#00C853"
+      }
+    },
+    "warn": {
+      "appearance": {
+        "solid": "#FFD600"
+      }
+    },
+    "fail": {
+      "appearance": {
+        "solid": "#FF1744"
+      }
+    },
+    "communication_failure": {
+      "appearance": {
+        "blink": {
+          "color": "#FF00FF",
+          "on": "500ms",
+          "off": "500ms"
+        }
+      }
+    },
+    "stale": {
+      "appearance": {
+        "pulse": {
+          "color": "#FF9100",
+          "period": "2s",
+          "minimum": "15%",
+          "maximum": "100%"
+        }
+      }
+    },
+    "unknown": {
+      "appearance": {
+        "solid": "#6200EA"
+      }
+    }
+  },
+  "monitors": [
+    {
+      "id": "lan-dns",
+      "type": "dns",
+      "host": "localhost",
+      "family": "any",
+      "interval": "30s",
+      "ttl": "2m",
+      "timeout": "2s",
+      "observe": {
+        "address_count": true
+      },
+      "evaluate": [
+        {
+          "when": {
+            "value": {
+              "greater_or_equal": 1
+            }
+          },
+          "status": "ok"
+        },
+        {
+          "otherwise": {
+            "status": "fail"
+          }
+        }
+      ]
+    },
+    {
+      "id": "wan-web",
+      "type": "http",
+      "url": "https://example.com/",
+      "interval": "1m",
+      "ttl": "3m",
+      "timeout": "5s",
+      "maximum_response_bytes": 4096,
+      "observe": {
+        "status_code": true
+      },
+      "evaluate": [
+        {
+          "when": {
+            "value": {
+              "between": [200, 399]
+            }
+          },
+          "status": "ok"
+        },
+        {
+          "otherwise": {
+            "status": "fail"
+          }
+        }
+      ]
+    },
+    {
+      "id": "vps-web-1",
+      "type": "http",
+      "url": "https://example.com/",
+      "interval": "1m",
+      "ttl": "3m",
+      "timeout": "5s",
+      "maximum_response_bytes": 4096,
+      "observe": {
+        "status_code": true
+      },
+      "evaluate": [
+        {
+          "when": {
+            "value": {
+              "between": [200, 399]
+            }
+          },
+          "status": "ok"
+        },
+        {
+          "otherwise": {
+            "status": "fail"
+          }
+        }
+      ]
+    },
+    {
+      "id": "vps-web-2",
+      "type": "http",
+      "url": "https://example.org/",
+      "interval": "1m",
+      "ttl": "3m",
+      "timeout": "5s",
+      "maximum_response_bytes": 4096,
+      "observe": {
+        "status_code": true
+      },
+      "evaluate": [
+        {
+          "when": {
+            "value": {
+              "between": [200, 399]
+            }
+          },
+          "status": "ok"
+        },
+        {
+          "otherwise": {
+            "status": "fail"
+          }
+        }
+      ]
+    },
+    {
+      "id": "vps-dns",
+      "type": "dns",
+      "host": "example.net",
+      "family": "any",
+      "interval": "1m",
+      "ttl": "3m",
+      "timeout": "3s",
+      "observe": {
+        "address_count": true
+      },
+      "evaluate": [
+        {
+          "when": {
+            "value": {
+              "greater_or_equal": 1
+            }
+          },
+          "status": "ok"
+        },
+        {
+          "otherwise": {
+            "status": "fail"
+          }
+        }
+      ]
+    },
+    {
+      "id": "vps-tls",
+      "type": "tcp_connect",
+      "host": "example.net",
+      "port": 443,
+      "interval": "1m",
+      "ttl": "3m",
+      "timeout": "3s",
+      "evaluate": [
+        {
+          "when": {
+            "value": {
+              "less_or_equal": 1000
+            }
+          },
+          "status": "ok"
+        },
+        {
+          "otherwise": {
+            "status": "warn"
+          }
+        }
+      ]
+    }
+  ],
+  "cards": [
+    {
+      "id": "logo",
+      "type": "bitmap",
+      "hold": "3s",
+      "transition": {
+        "type": "fade",
+        "duration": "750ms"
+      },
+      "palette": {
+        ".": "#02050A",
+        "B": "#0050C8",
+        "C": "#40C4FF"
+      },
+      "pixels": [
+        "................",
+        "..BB......BB....",
+        "..BBB.....BB....",
+        "..BBBB....BB....",
+        "..BB.BB...BB....",
+        "..BB..BB..BB....",
+        "..BB...BB.BB....",
+        "..BB....BBBB....",
+        "..BB.....BBB....",
+        "..BB......BB....",
+        "................",
+        "..CC......CC....",
+        "...CC....CC.....",
+        "....CC..CC......",
+        ".....CCCC.......",
+        "....CC..CC......"
+      ]
+    },
+    {
+      "id": "clock",
+      "type": "clock",
+      "hold": "5s",
+      "local_color": "#40C4FF",
+      "utc_color": "#FFD600",
+      "transition": {
+        "type": "slide_left",
+        "duration": "750ms"
+      }
+    },
+    {
+      "id": "network",
+      "type": "indicators",
+      "hold": "5s",
+      "transition": {
+        "type": "slide_up",
+        "duration": "750ms"
+      },
+      "indicators": [
+        {
+          "id": "lan",
+          "source": "lan-dns",
+          "x": 0,
+          "y": 0,
+          "width": 7,
+          "height": 16
+        },
+        {
+          "id": "wan",
+          "source": "wan-web",
+          "x": 9,
+          "y": 0,
+          "width": 7,
+          "height": 16
+        }
+      ]
+    },
+    {
+      "id": "servers",
+      "type": "indicators",
+      "hold": "5s",
+      "transition": {
+        "type": "instant"
+      },
+      "indicators": [
+        {
+          "id": "web-1",
+          "source": "vps-web-1",
+          "x": 0,
+          "y": 0,
+          "width": 7,
+          "height": 7
+        },
+        {
+          "id": "web-2",
+          "source": "vps-web-2",
+          "x": 9,
+          "y": 0,
+          "width": 7,
+          "height": 7
+        },
+        {
+          "id": "dns",
+          "source": "vps-dns",
+          "x": 0,
+          "y": 9,
+          "width": 7,
+          "height": 7
+        },
+        {
+          "id": "tls",
+          "source": "vps-tls",
+          "x": 9,
+          "y": 9,
+          "width": 7,
+          "height": 7
+        }
+      ]
+    }
+  ]
+}

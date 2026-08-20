@@ -28,6 +28,11 @@ Each indicator names a state source and a rectangular, in-bounds display region.
 Unknown reported status names render with the `unknown` appearance rather than
 changing the transport contract.
 
+The root must contain exactly one presentation form: `indicators` for a permanent
+layout, or `cards` for a timed deck. Cards may contain a palette bitmap, a two-line
+local/UTC clock, or their own indicator layout. See [Card Decks](card-decks.md) for
+the complete card and transition grammar.
+
 Durations are integer strings using `ms`, `s`, `m`, or `h`, such as `250ms`, `2s`,
 or `1m`. Colors use `#RRGGBB`.
 

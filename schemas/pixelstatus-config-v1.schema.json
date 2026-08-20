@@ -7,8 +7,17 @@
   "required": [
     "schema_version",
     "display",
-    "statuses",
-    "indicators"
+    "statuses"
+  ],
+  "oneOf": [
+    {
+      "required": ["indicators"],
+      "not": {"required": ["cards"]}
+    },
+    {
+      "required": ["cards"],
+      "not": {"required": ["indicators"]}
+    }
   ],
   "properties": {
     "schema_version": {
@@ -45,6 +54,14 @@
       "maxItems": 1024,
       "items": {
         "$ref": "#/$defs/indicator"
+      }
+    },
+    "cards": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 32,
+      "items": {
+        "$ref": "#/$defs/card"
       }
     }
   },
@@ -724,6 +741,101 @@
           ]
         }
       }
+    },
+    "cardTransition": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type"],
+          "properties": {
+            "type": {"const": "instant"}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "duration"],
+          "properties": {
+            "type": {
+              "enum": [
+                "fade",
+                "slide_left",
+                "slide_right",
+                "slide_up",
+                "slide_down"
+              ]
+            },
+            "duration": {"$ref": "#/$defs/positiveDuration"}
+          }
+        }
+      ]
+    },
+    "card": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "type", "hold", "palette", "pixels"],
+          "properties": {
+            "id": {"$ref": "#/$defs/identifier"},
+            "type": {"const": "bitmap"},
+            "hold": {"$ref": "#/$defs/positiveDuration"},
+            "transition": {"$ref": "#/$defs/cardTransition"},
+            "palette": {
+              "type": "object",
+              "minProperties": 1,
+              "maxProperties": 32,
+              "propertyNames": {
+                "minLength": 1,
+                "maxLength": 1,
+                "pattern": "^[ -~]$"
+              },
+              "additionalProperties": {"$ref": "#/$defs/color"}
+            },
+            "pixels": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 256,
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "type", "hold"],
+          "properties": {
+            "id": {"$ref": "#/$defs/identifier"},
+            "type": {"const": "clock"},
+            "hold": {"$ref": "#/$defs/positiveDuration"},
+            "transition": {"$ref": "#/$defs/cardTransition"},
+            "local_color": {"$ref": "#/$defs/color"},
+            "utc_color": {"$ref": "#/$defs/color"}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "type", "hold", "indicators"],
+          "properties": {
+            "id": {"$ref": "#/$defs/identifier"},
+            "type": {"const": "indicators"},
+            "hold": {"$ref": "#/$defs/positiveDuration"},
+            "transition": {"$ref": "#/$defs/cardTransition"},
+            "indicators": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 1024,
+              "items": {"$ref": "#/$defs/indicator"}
+            }
+          }
+        }
+      ]
     },
     "indicator": {
       "type": "object",
