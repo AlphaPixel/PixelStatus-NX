@@ -1,0 +1,117 @@
+{
+  "version": "0.2.1",
+  "defaults": {
+    "type": "default",
+    "project": "CMakeLists.txt",
+    "currentDir": "${workspaceRoot}",
+    "debugType": "native",
+    "stopOnEntry": false
+  },
+  "configurations": [
+    {
+      "name": "Simulator - Native + Browser",
+      "projectTarget": "pixelstatus_simulator.exe (Debug\\pixelstatus_simulator.exe)",
+      "program": "${cmake.binaryDir}/Debug/pixelstatus_simulator.exe",
+      "args": [
+        "${workspaceRoot}/examples/pixelstatus.sample.json",
+        "--api-token",
+        "pixelstatus-vs-debug",
+        "--api-port",
+        "18787",
+        "--web-display-port",
+        "18788",
+        "--web-refresh-ms",
+        "100"
+      ]
+    },
+    {
+      "name": "Simulator - Browser Only (30 FPS)",
+      "projectTarget": "pixelstatus_simulator.exe (Debug\\pixelstatus_simulator.exe)",
+      "program": "${cmake.binaryDir}/Debug/pixelstatus_simulator.exe",
+      "args": [
+        "${workspaceRoot}/examples/pixelstatus.sample.json",
+        "--no-window",
+        "--api-token",
+        "pixelstatus-vs-debug",
+        "--api-port",
+        "18797",
+        "--web-display-port",
+        "18798",
+        "--web-refresh-ms",
+        "33"
+      ]
+    },
+    {
+      "name": "Simulator - Native Only (Push API)",
+      "projectTarget": "pixelstatus_simulator.exe (Debug\\pixelstatus_simulator.exe)",
+      "program": "${cmake.binaryDir}/Debug/pixelstatus_simulator.exe",
+      "args": [
+        "${workspaceRoot}/examples/pixelstatus.sample.json",
+        "--no-web-display",
+        "--api-token",
+        "pixelstatus-vs-debug",
+        "--api-port",
+        "18807"
+      ]
+    },
+    {
+      "name": "Simulator - HTTP Monitor (Native + Browser)",
+      "projectTarget": "pixelstatus_simulator.exe (Debug\\pixelstatus_simulator.exe)",
+      "program": "${cmake.binaryDir}/Debug/pixelstatus_simulator.exe",
+      "args": [
+        "${workspaceRoot}/examples/http-monitor.example.json",
+        "--api-token",
+        "pixelstatus-vs-debug",
+        "--api-port",
+        "18817",
+        "--web-display-port",
+        "18818",
+        "--web-refresh-ms",
+        "100",
+        "--monitor-workers",
+        "2"
+      ]
+    },
+    {
+      "name": "Simulator - Concurrent HTTP Monitors",
+      "projectTarget": "pixelstatus_simulator.exe (Debug\\pixelstatus_simulator.exe)",
+      "program": "${cmake.binaryDir}/Debug/pixelstatus_simulator.exe",
+      "args": [
+        "${workspaceRoot}/examples/concurrent-monitors.example.json",
+        "--no-window",
+        "--api-token",
+        "pixelstatus-vs-debug",
+        "--api-port",
+        "18837",
+        "--web-display-port",
+        "18838",
+        "--web-refresh-ms",
+        "100",
+        "--monitor-workers",
+        "2"
+      ]
+    },
+    {
+      "name": "Simulator - Timed Browser Smoke (10 seconds)",
+      "projectTarget": "pixelstatus_simulator.exe (Debug\\pixelstatus_simulator.exe)",
+      "program": "${cmake.binaryDir}/Debug/pixelstatus_simulator.exe",
+      "args": [
+        "${workspaceRoot}/examples/pixelstatus.sample.json",
+        "--no-window",
+        "--no-api",
+        "--web-display-port",
+        "18828",
+        "--web-refresh-ms",
+        "17",
+        "--run-for-ms",
+        "10000"
+      ]
+    },
+    {
+      "name": "Tests - Active CMake Preset",
+      "projectTarget": "pixelstatus_tests.exe (Debug\\pixelstatus_tests.exe)",
+      "program": "${cmake.binaryDir}/Debug/pixelstatus_tests.exe",
+      "args": []
+    }
+  ]
+}

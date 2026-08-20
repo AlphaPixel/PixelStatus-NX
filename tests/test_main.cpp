@@ -9,20 +9,26 @@
 #include "pixelstatus/status_api.hpp"
 
 #ifdef PIXELSTATUS_TEST_HOST_HTTP
+#include "pixelstatus/host/http_display_driver.hpp"
 #include "pixelstatus/host/http_monitor_runner.hpp"
+#include "pixelstatus/host/monitor_executor.hpp"
 
 #include <httplib.h>
+#include <nlohmann/json.hpp>
 #endif
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <deque>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <limits>
 #include <memory>
+#include <mutex>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -747,6 +753,134 @@ void test_configuration_rejects_unknown_fields() {
 
 #ifdef PIXELSTATUS_TEST_HOST_HTTP
 
+struct BlockingRunnerProbe {
+    std::mutex mutex;
+    std::condition_variable condition;
+    bool started{};
+    bool release{};
+    std::atomic_size_t calls{};
+    std::atomic_size_t active{};
+    std::atomic_size_t maximum_active{};
+};
+
+class BlockingMonitorRunner final : public pixelstatus::MonitorRunner {
+public:
+    explicit BlockingMonitorRunner(std::shared_ptr<BlockingRunnerProbe> probe)
+        : probe_(std::move(probe)) {}
+
+    pixelstatus::MonitorResult run(pixelstatus::TimePoint) override {
+        probe_->calls.fetch_add(1U, std::memory_order_relaxed);
+        const auto active = probe_->active.fetch_add(1U, std::memory_order_relaxed) + 1U;
+        auto maximum = probe_->maximum_active.load(std::memory_order_relaxed);
+        while (maximum < active
+               && !probe_->maximum_active.compare_exchange_weak(
+                   maximum, active, std::memory_order_relaxed)) {
+        }
+
+        {
+            std::unique_lock lock(probe_->mutex);
+            probe_->started = true;
+            probe_->condition.notify_all();
+            probe_->condition.wait(lock, [this] { return probe_->release; });
+        }
+        probe_->active.fetch_sub(1U, std::memory_order_relaxed);
+        return successful_monitor_result(std::int64_t{1});
+    }
+
+private:
+    std::shared_ptr<BlockingRunnerProbe> probe_;
+};
+
+class ImmediateMonitorRunner final : public pixelstatus::MonitorRunner {
+public:
+    explicit ImmediateMonitorRunner(std::shared_ptr<std::atomic_size_t> calls)
+        : calls_(std::move(calls)) {}
+
+    pixelstatus::MonitorResult run(pixelstatus::TimePoint) override {
+        calls_->fetch_add(1U, std::memory_order_relaxed);
+        return successful_monitor_result(std::int64_t{2});
+    }
+
+private:
+    std::shared_ptr<std::atomic_size_t> calls_;
+};
+
+void test_monitor_executor_concurrency() {
+    pixelstatus::StateStore states;
+    pixelstatus::MonitorEngine engine(states);
+    pixelstatus::EvaluationPolicy always_ok;
+    always_ok.rules.push_back({std::nullopt, "ok"});
+    const auto first_due = std::chrono::steady_clock::now();
+
+    auto blocking_probe = std::make_shared<BlockingRunnerProbe>();
+    pixelstatus::MonitorDefinition slow;
+    slow.id = "a-slow";
+    slow.interval = 1ms;
+    slow.evaluation = always_ok;
+    CHECK(engine.add(
+        std::move(slow),
+        std::make_unique<BlockingMonitorRunner>(blocking_probe),
+        first_due));
+
+    auto fast_calls = std::make_shared<std::atomic_size_t>(0U);
+    pixelstatus::MonitorDefinition fast;
+    fast.id = "b-fast";
+    fast.interval = 10s;
+    fast.evaluation = always_ok;
+    CHECK(engine.add(
+        std::move(fast),
+        std::make_unique<ImmediateMonitorRunner>(fast_calls),
+        first_due));
+
+    pixelstatus::host::MonitorExecutorOptions options;
+    options.worker_count = 2U;
+    options.idle_poll_interval = 1ms;
+    pixelstatus::host::MonitorExecutor executor(engine, options);
+    CHECK(executor.start());
+    CHECK(executor.running());
+    CHECK(executor.worker_count() == 2U);
+
+    {
+        std::unique_lock lock(blocking_probe->mutex);
+        CHECK(blocking_probe->condition.wait_for(
+            lock, 1s, [&blocking_probe] { return blocking_probe->started; }));
+    }
+
+    const auto fast_deadline = std::chrono::steady_clock::now() + 1s;
+    while (!states.find("b-fast") && std::chrono::steady_clock::now() < fast_deadline) {
+        std::this_thread::sleep_for(1ms);
+    }
+    CHECK(states.find("b-fast").has_value());
+    CHECK(fast_calls->load(std::memory_order_relaxed) == 1U);
+
+    std::this_thread::sleep_for(20ms);
+    CHECK(blocking_probe->calls.load(std::memory_order_relaxed) == 1U);
+    CHECK(blocking_probe->maximum_active.load(std::memory_order_relaxed) == 1U);
+
+    {
+        std::scoped_lock lock(blocking_probe->mutex);
+        blocking_probe->release = true;
+    }
+    blocking_probe->condition.notify_all();
+
+    const auto slow_deadline = std::chrono::steady_clock::now() + 1s;
+    while (!states.find("a-slow") && std::chrono::steady_clock::now() < slow_deadline) {
+        std::this_thread::sleep_for(1ms);
+    }
+    CHECK(states.find("a-slow").has_value());
+    executor.stop();
+    CHECK(!executor.running());
+    CHECK(executor.worker_count() == 0U);
+    const auto stats = executor.stats();
+    CHECK(stats.jobs_executed >= 2U);
+    CHECK(stats.state_updates >= 2U);
+
+    options.worker_count = 0U;
+    pixelstatus::host::MonitorExecutor invalid(engine, options);
+    CHECK(!invalid.start());
+    CHECK(!invalid.error().empty());
+}
+
 class MockHttpMonitorServer {
 public:
     MockHttpMonitorServer() {
@@ -913,6 +1047,97 @@ void test_host_http_monitor_runner() {
     CHECK((*frame.pixel(0, 0) == pixelstatus::Rgb{0x00, 0xC8, 0x53}));
 }
 
+void test_http_display_driver() {
+    pixelstatus::host::HttpDisplayOptions options;
+    options.port = 0;
+    options.default_refresh_interval = 33ms;
+    pixelstatus::host::HttpDisplayDriver display(2U, 1U, options);
+    CHECK(display.begin());
+    CHECK(display.running());
+    CHECK(display.port() != 0U);
+    CHECK(display.url().starts_with("http://127.0.0.1:"));
+    if (!display.running() || display.port() == 0U) {
+        return;
+    }
+
+    httplib::Client client("127.0.0.1", display.port());
+    client.set_connection_timeout(1s);
+    client.set_read_timeout(1s);
+
+    std::this_thread::sleep_for(5ms);
+    const auto page = client.Get("/");
+    CHECK(page);
+    if (!page) {
+        display.stop();
+        return;
+    }
+    CHECK(page->status == 200);
+    CHECK(page->get_header_value("Content-Type").starts_with("text/html"));
+    CHECK(page->body.find("pixelstatus-display") != std::string::npos);
+    CHECK(page->body.find("refresh-rate") != std::string::npos);
+    CHECK(page->body.find("Open minimal display window") != std::string::npos);
+
+    const auto initial = client.Get("/api/v1/display");
+    CHECK(initial);
+    if (!initial) {
+        display.stop();
+        return;
+    }
+    CHECK(initial->status == 200);
+    const auto initial_json = nlohmann::json::parse(initial->body);
+    CHECK(initial_json.at("schema_version") == 1);
+    CHECK(initial_json.at("width") == 2U);
+    CHECK(initial_json.at("height") == 1U);
+    CHECK(initial_json.at("sequence") == 0U);
+    CHECK(initial_json.at("format") == "rgb888");
+    CHECK(initial_json.at("default_refresh_ms") == 33);
+    CHECK(initial_json.at("pixels") == nlohmann::json::array({0U, 0U}));
+
+    const auto initial_etag = initial->get_header_value("ETag");
+    CHECK(!initial_etag.empty());
+    const auto unchanged = client.Get(
+        "/api/v1/display",
+        httplib::Headers{{"If-None-Match", initial_etag}});
+    CHECK(unchanged);
+    CHECK(unchanged && unchanged->status == 304);
+
+    pixelstatus::Frame frame(2U, 1U);
+    CHECK(frame.set_pixel(0U, 0U, {255U, 0U, 0U}));
+    CHECK(frame.set_pixel(1U, 0U, {0U, 255U, 0U}));
+    CHECK(display.submit_frame(frame) == pixelstatus::FrameSubmitResult::accepted);
+    CHECK(display.submit_frame(frame) == pixelstatus::FrameSubmitResult::coalesced);
+    CHECK(display.submit_frame(pixelstatus::Frame(1U, 1U))
+          == pixelstatus::FrameSubmitResult::unavailable);
+
+    const auto updated = client.Get("/api/v1/display");
+    CHECK(updated);
+    if (updated) {
+        CHECK(updated->status == 200);
+        const auto updated_json = nlohmann::json::parse(updated->body);
+        CHECK(updated_json.at("sequence") == 2U);
+        CHECK(updated_json.at("pixels")
+              == nlohmann::json::array({0xFF0000U, 0x00FF00U}));
+    }
+
+    const auto manifest = client.Get("/manifest.webmanifest");
+    CHECK(manifest);
+    CHECK(manifest && manifest->status == 200);
+    CHECK(manifest && manifest->body.find("\"standalone\"") != std::string::npos);
+
+    const auto state = display.state();
+    CHECK(state.connection == pixelstatus::DriverConnectionState::ready);
+    CHECK(state.submitted_frames == 2U);
+    CHECK(state.coalesced_frames == 1U);
+    display.stop();
+    CHECK(!display.running());
+    CHECK(display.state().connection == pixelstatus::DriverConnectionState::stopped);
+
+    options.default_refresh_interval = 15ms;
+    pixelstatus::host::HttpDisplayDriver invalid(1U, 1U, options);
+    CHECK(!invalid.begin());
+    CHECK(invalid.state().connection == pixelstatus::DriverConnectionState::failed);
+}
+
 #endif
 
 }  // namespace
@@ -934,7 +1159,9 @@ int main() {
     test_evaluator_comparisons();
     test_monitor_engine();
 #ifdef PIXELSTATUS_TEST_HOST_HTTP
+    test_monitor_executor_concurrency();
     test_host_http_monitor_runner();
+    test_http_display_driver();
 #endif
 
     if (failures != 0) {

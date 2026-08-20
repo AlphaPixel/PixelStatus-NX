@@ -3,12 +3,15 @@
 
 #include "pixelstatus/config.hpp"
 #include "pixelstatus/frame.hpp"
+#include "pixelstatus/host/http_display_driver.hpp"
 #include "pixelstatus/host/http_monitor_runner.hpp"
+#include "pixelstatus/host/monitor_executor.hpp"
 #include "pixelstatus/monitor_engine.hpp"
 #include "pixelstatus/renderer.hpp"
 #include "pixelstatus/state.hpp"
 #include "pixelstatus/status_api.hpp"
 
+#include <algorithm>
 #include <array>
 #include <charconv>
 #include <chrono>
@@ -59,6 +62,12 @@ struct CommandLine {
     std::uint16_t api_port{8787};
     std::optional<std::string> api_token;
     bool api_enabled{true};
+    std::string web_display_bind{"127.0.0.1"};
+    std::uint16_t web_display_port{8788};
+    std::chrono::milliseconds web_refresh_interval{100};
+    std::size_t monitor_worker_count{2U};
+    bool web_display_enabled{true};
+    bool window_enabled{true};
 };
 
 std::optional<CommandLine> parse_command_line(int argc, char** argv) {
@@ -107,6 +116,67 @@ std::optional<CommandLine> parse_command_line(int argc, char** argv) {
             options.api_enabled = false;
             continue;
         }
+        if (argument == "--web-display-port") {
+            if (++index >= argc) {
+                return std::nullopt;
+            }
+            std::uint32_t port{};
+            const std::string_view value(argv[index]);
+            const auto parsed = std::from_chars(
+                value.data(), value.data() + value.size(), port, 10);
+            if (parsed.ec != std::errc{} || parsed.ptr != value.data() + value.size()
+                || port == 0U || port > 65'535U) {
+                return std::nullopt;
+            }
+            options.web_display_port = static_cast<std::uint16_t>(port);
+            continue;
+        }
+        if (argument == "--web-display-bind") {
+            if (++index >= argc || std::string_view(argv[index]).empty()) {
+                return std::nullopt;
+            }
+            options.web_display_bind = argv[index];
+            continue;
+        }
+        if (argument == "--web-refresh-ms") {
+            if (++index >= argc) {
+                return std::nullopt;
+            }
+            std::int64_t milliseconds{};
+            const std::string_view value(argv[index]);
+            const auto parsed = std::from_chars(
+                value.data(), value.data() + value.size(), milliseconds, 10);
+            if (parsed.ec != std::errc{} || parsed.ptr != value.data() + value.size()
+                || milliseconds < 16 || milliseconds > 5 * 60 * 1000) {
+                return std::nullopt;
+            }
+            options.web_refresh_interval = std::chrono::milliseconds(milliseconds);
+            continue;
+        }
+        if (argument == "--no-web-display") {
+            options.web_display_enabled = false;
+            continue;
+        }
+        if (argument == "--no-window") {
+            options.window_enabled = false;
+            continue;
+        }
+        if (argument == "--monitor-workers") {
+            if (++index >= argc) {
+                return std::nullopt;
+            }
+            std::uint32_t worker_count{};
+            const std::string_view value(argv[index]);
+            const auto parsed = std::from_chars(
+                value.data(), value.data() + value.size(), worker_count, 10);
+            if (parsed.ec != std::errc{} || parsed.ptr != value.data() + value.size()
+                || worker_count == 0U
+                || worker_count > pixelstatus::host::maximum_monitor_worker_count) {
+                return std::nullopt;
+            }
+            options.monitor_worker_count = worker_count;
+            continue;
+        }
         if (config_was_set || argument.starts_with('-')) {
             return std::nullopt;
         }
@@ -138,7 +208,10 @@ int main(int argc, char** argv) {
     if (!options) {
         std::cerr
             << "Usage: pixelstatus_simulator [config.json] [--run-for-ms N] "
-               "[--api-port N] [--api-token TOKEN] [--no-api]\n";
+               "[--api-port N] [--api-token TOKEN] [--no-api] "
+               "[--web-display-port N] [--web-display-bind ADDRESS] "
+               "[--web-refresh-ms N] [--no-web-display] [--no-window] "
+               "[--monitor-workers N]\n";
         return 2;
     }
     const auto loaded = pixelstatus::load_config_file(options->config_path);
@@ -151,13 +224,40 @@ int main(int argc, char** argv) {
     }
     const auto& config = *loaded.config;
 
-    pixelstatus::simulator::Win32OutputDriver display(
-        config.display.width,
-        config.display.height,
-        L"PixelStatus NX - Win32 Display Simulator");
-    if (!display.begin()) {
-        std::cerr << "Unable to start the Win32 simulator: " << display.state().detail << '\n';
+    if (!options->window_enabled && !options->web_display_enabled) {
+        std::cerr << "At least one display backend must be enabled\n";
         return 1;
+    }
+
+    std::unique_ptr<pixelstatus::simulator::Win32OutputDriver> display;
+    if (options->window_enabled) {
+        display = std::make_unique<pixelstatus::simulator::Win32OutputDriver>(
+            config.display.width,
+            config.display.height,
+            L"PixelStatus NX - Win32 Display Simulator");
+        if (!display->begin()) {
+            std::cerr << "Unable to start the Win32 simulator: "
+                      << display->state().detail << '\n';
+            return 1;
+        }
+    }
+
+    std::unique_ptr<pixelstatus::host::HttpDisplayDriver> web_display;
+    if (options->web_display_enabled) {
+        pixelstatus::host::HttpDisplayOptions web_options;
+        web_options.bind_address = options->web_display_bind;
+        web_options.port = options->web_display_port;
+        web_options.default_refresh_interval = options->web_refresh_interval;
+        web_display = std::make_unique<pixelstatus::host::HttpDisplayDriver>(
+            config.display.width,
+            config.display.height,
+            std::move(web_options));
+        if (!web_display->begin()) {
+            std::cerr << "Unable to start the HTTP display: "
+                      << web_display->state().detail << '\n';
+            return 1;
+        }
+        std::cout << "Browser display: " << web_display->url() << '\n';
     }
 
     const auto started_at = std::chrono::steady_clock::now();
@@ -203,15 +303,20 @@ int main(int argc, char** argv) {
             return 1;
         }
     }
-    std::jthread monitor_worker;
+    std::unique_ptr<pixelstatus::host::MonitorExecutor> monitor_executor;
     if (monitor_engine.size() != 0U) {
-        monitor_worker = std::jthread([&monitor_engine](std::stop_token stop) {
-            while (!stop.stop_requested()) {
-                static_cast<void>(monitor_engine.run_due(
-                    std::chrono::steady_clock::now(), 1U));
-                std::this_thread::sleep_for(10ms);
-            }
-        });
+        pixelstatus::host::MonitorExecutorOptions executor_options;
+        executor_options.worker_count = std::min(
+            options->monitor_worker_count,
+            monitor_engine.size());
+        monitor_executor = std::make_unique<pixelstatus::host::MonitorExecutor>(
+            monitor_engine,
+            executor_options);
+        if (!monitor_executor->start()) {
+            std::cerr << "Unable to start monitor executor: "
+                      << monitor_executor->error() << '\n';
+            return 1;
+        }
     }
 
     std::unique_ptr<pixelstatus::StatusApi> status_api;
@@ -241,21 +346,33 @@ int main(int argc, char** argv) {
     bool first_source_failed = false;
 
     std::cout << "Loaded " << options->config_path << '\n'
-              << "The final region becomes stale after six seconds.\n"
-              << "Close the simulator window to exit.\n";
+              << "The final region becomes stale after six seconds.\n";
+    if (display) {
+        std::cout << "Close the simulator window to exit.\n";
+    } else {
+        std::cout << "Running headless; press Ctrl+C to exit.\n";
+    }
     if (config.monitors.empty()) {
         std::cout << "The first region changes status every four seconds.\n";
     } else {
         std::cout << "Configured pull monitors: " << config.monitors.size() << '\n';
     }
 
-    while (display.process_events()) {
+    while (!display || display->process_events()) {
         const auto now = std::chrono::steady_clock::now();
         if (options->run_for && now - started_at >= *options->run_for) {
             break;
         }
         if (http_server && !http_server->running()) {
             std::cerr << "Status API failure: " << http_server->error() << '\n';
+            return 1;
+        }
+        if (web_display && !web_display->running()) {
+            std::cerr << "HTTP display failure: " << web_display->state().detail << '\n';
+            return 1;
+        }
+        if (monitor_executor && !monitor_executor->running()) {
+            std::cerr << monitor_executor->error() << '\n';
             return 1;
         }
         if (config.monitors.empty() && !sources.empty() && now >= next_transition) {
@@ -276,14 +393,34 @@ int main(int argc, char** argv) {
                 std::cerr << "Rendering failed: " << report.error << '\n';
                 return 1;
             }
-            static_cast<void>(display.submit_frame(frame));
+            if (display) {
+                static_cast<void>(display->submit_frame(frame));
+            }
+            if (web_display) {
+                static_cast<void>(web_display->submit_frame(frame));
+            }
             next_frame = now + 33ms;
         }
         std::this_thread::sleep_for(2ms);
     }
 
-    const auto final_state = display.state();
-    std::cout << "Frames submitted: " << final_state.submitted_frames
-              << ", coalesced: " << final_state.coalesced_frames << '\n';
+    if (display) {
+        const auto final_state = display->state();
+        std::cout << "Win32 frames submitted: " << final_state.submitted_frames
+                  << ", coalesced: " << final_state.coalesced_frames << '\n';
+    }
+    if (web_display) {
+        const auto final_state = web_display->state();
+        std::cout << "HTTP frames submitted: " << final_state.submitted_frames
+                  << ", coalesced: " << final_state.coalesced_frames << '\n';
+    }
+    if (monitor_executor) {
+        const auto final_worker_count = monitor_executor->worker_count();
+        monitor_executor->stop();
+        const auto final_stats = monitor_executor->stats();
+        std::cout << "Monitor workers: " << final_worker_count
+                  << ", checks executed: " << final_stats.jobs_executed
+                  << ", transport failures: " << final_stats.transport_failures << '\n';
+    }
     return 0;
 }

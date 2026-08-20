@@ -26,7 +26,12 @@ The next host-only layer—normalized monitor results, ordered evaluation rules,
 deterministic interval scheduling—is described in
 [Host Monitor Engine](docs/monitor-engine.md).
 Declarative HTTP GET monitoring with bounded body, timeout, status/body/JSON-Pointer
-observation, and a loopback-tested desktop adapter now uses those contracts.
+observation, and a loopback-tested desktop adapter now uses those contracts. A
+bounded desktop worker pool prevents one slow check from stalling unrelated
+monitors or either display backend.
+The same rendered framebuffer is also available through a responsive
+[Browser Display Backend](docs/http-display.md), including a read-only frame API and
+headless host mode.
 
 ---
 
@@ -243,6 +248,10 @@ Useful for:
 - debugging.
 
 Additional output drivers should be possible without altering monitor or renderer code.
+
+The host build currently includes both a native Win32 driver and an HTTP browser
+driver. They consume the same logical frame concurrently, and the HTTP driver can
+run headlessly for browser-only or remote-display use.
 
 Example interface:
 
@@ -2137,5 +2146,6 @@ enter through the established state, rendering, and driver contracts.
 
 Status: the portable interval scheduler, runner boundary, normalized result, generic
 evaluator, strict monitor JSON grammar, and first desktop HTTP/JSON runner are
-host-tested. HTTPS, additional network runners, jitter/cron support, and a
-multi-worker executor remain incremental follow-on work.
+host-tested. The Win32 host also has a bounded multi-worker executor with per-monitor
+in-flight exclusion. HTTPS, additional network runners, jitter/cron support, and
+in-flight cancellation remain incremental follow-on work.

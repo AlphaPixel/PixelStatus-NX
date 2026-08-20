@@ -48,7 +48,8 @@ try {
         $quotedConfig,
         '--run-for-ms', '10000',
         '--api-token', $token,
-        '--api-port', $ApiPort.ToString()
+        '--api-port', $ApiPort.ToString(),
+        '--no-web-display'
     )
     $simulatorProcess = Start-Process `
         -FilePath (Resolve-Path -LiteralPath $simulator) `

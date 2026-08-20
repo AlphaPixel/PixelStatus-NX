@@ -64,7 +64,11 @@ if(PIXELSTATUS_BUILD_HOST_HTTP OR PIXELSTATUS_BUILD_SIMULATOR)
 endif()
 
 if(PIXELSTATUS_BUILD_HOST_HTTP)
-    add_library(pixelstatus_host_http src/host/http_monitor_runner.cpp)
+    add_library(pixelstatus_host_http
+        src/host/http_display_driver.cpp
+        src/host/http_monitor_runner.cpp
+        src/host/monitor_executor.cpp
+    )
     target_include_directories(pixelstatus_host_http PUBLIC include)
     target_link_libraries(pixelstatus_host_http PRIVATE
         pixelstatus_core
@@ -118,6 +122,9 @@ if(PIXELSTATUS_BUILD_SIMULATOR)
             ${CMAKE_CURRENT_SOURCE_DIR}/examples/http-monitor.example.json
             $<TARGET_FILE_DIR:pixelstatus_simulator>/http-monitor.example.json
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            ${CMAKE_CURRENT_SOURCE_DIR}/examples/concurrent-monitors.example.json
+            $<TARGET_FILE_DIR:pixelstatus_simulator>/concurrent-monitors.example.json
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
             ${CMAKE_CURRENT_SOURCE_DIR}/THIRD_PARTY_NOTICES.md
             $<TARGET_FILE_DIR:pixelstatus_simulator>/THIRD_PARTY_NOTICES.md
         VERBATIM
@@ -136,6 +143,7 @@ if(PIXELSTATUS_BUILD_TESTS)
         target_link_libraries(pixelstatus_tests PRIVATE
             pixelstatus_host_http
             httplib::httplib
+            nlohmann_json::nlohmann_json
         )
         target_compile_definitions(pixelstatus_tests PRIVATE
             PIXELSTATUS_TEST_HOST_HTTP=1

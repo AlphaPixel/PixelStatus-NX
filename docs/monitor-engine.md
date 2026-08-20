@@ -63,20 +63,29 @@ uses `no_match_status`, which defaults to `unknown`.
 A monitor registration supplies its ID, interval, optional state TTL, evaluation
 policy, runner, and first due time. The engine supports at most 256 registrations.
 
-`run_due(now, maximum_runs)` executes due jobs synchronously and publishes their
-states. Due jobs are ordered by due time and then monitor ID. `maximum_runs` bounds
-the work performed by one pump without losing pending jobs.
+`run_due(now, maximum_runs)` claims due jobs, executes the claimed work
+synchronously in the calling thread, and publishes the resulting states. Due jobs
+are ordered by due time and then monitor ID. `maximum_runs` bounds the work
+performed by one pump without losing pending jobs. Multiple callers may pump one
+engine concurrently; an in-flight claim prevents the same monitor from overlapping
+itself.
 
 If a caller pumps late, each due monitor runs once and advances to its first interval
 strictly after `now`. It does not launch a burst to replay every missed interval.
 This is intentional for a resource-constrained appliance: current health matters
 more than recreating obsolete checks.
 
-The current synchronous executor is the deterministic reference implementation.
-The Win32 simulator pumps it from one background thread with at most one active
-monitor request, keeping network timeouts away from the display event loop. A later
-bounded host or FreeRTOS worker queue can increase concurrency without changing
-completion through the evaluator and state store contracts.
+The synchronous pump remains the deterministic reference interface. The Win32
+simulator drives it through a bounded reusable executor with two workers by default
+and a configurable range of one through eight. Each worker claims at most one job
+per pump. A blocked HTTP request therefore consumes one worker without blocking the
+display event loop, status API, browser display, or an available monitor worker.
+
+The host executor uses `std::jthread` stop requests for orderly ownership and joins.
+An HTTP request already inside the synchronous runner cannot be interrupted, so
+shutdown can wait up to that monitor's configured timeout. The future FreeRTOS
+executor can reuse the same claim/evaluate/publish contract while providing its own
+task and cancellation mechanisms.
 
 ## Desktop HTTP Adapter
 
@@ -93,6 +102,6 @@ the transport-failure status.
 ## Deliberately Deferred
 
 HTTPS, custom request methods/headers/bodies, DNS/TCP-specific runners, jitter, cron
-scheduling, cancellation, and a multi-worker executor remain deferred. HTTPS URLs
-are valid portable configuration, but the current desktop factory rejects them at
+scheduling, and in-flight request cancellation remain deferred. HTTPS URLs are
+valid portable configuration, but the current desktop factory rejects them at
 startup because this build deliberately does not link a TLS library.

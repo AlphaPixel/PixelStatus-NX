@@ -16,7 +16,8 @@ $token = 'pixelstatus-host-integration-test'
 $arguments = @(
     '--run-for-ms', '10000',
     '--api-token', $token,
-    '--api-port', $Port.ToString()
+    '--api-port', $Port.ToString(),
+    '--no-web-display'
 )
 $simulatorProcess = Start-Process `
     -FilePath (Resolve-Path -LiteralPath $simulator) `

@@ -32,6 +32,44 @@ The equivalent one-command workflow is:
 .\tools\build-host.ps1
 ```
 
+## Visual Studio Debug Profiles
+
+Open the repository folder directly in Visual Studio 2022 and select the
+`windows-debug` configure/build preset. The repository-root [`launch.vs.json`](../launch.vs.json)
+adds these shared entries to the **Startup Item** dropdown:
+
+| Startup item | Behavior | Endpoints |
+| --- | --- | --- |
+| `Simulator - Native + Browser` | Sample configuration with both output drivers | Status API `18787`, browser `18788` |
+| `Simulator - Browser Only (30 FPS)` | Headless sample display at a 33 ms client default | Status API `18797`, browser `18798` |
+| `Simulator - Native Only (Push API)` | Win32 output without the browser server | Status API `18807` |
+| `Simulator - HTTP Monitor (Native + Browser)` | HTTP/JSON monitor example with both outputs | Status API `18817`, browser `18818` |
+| `Simulator - Concurrent HTTP Monitors` | Headless two-monitor slow/fast concurrency example | Status API `18837`, browser `18838` |
+| `Simulator - Timed Browser Smoke (10 seconds)` | Headless, API-disabled, 60 FPS browser exercise that exits automatically | Browser `18828` |
+| `Tests - Active CMake Preset` | Runs `pixelstatus_tests` under the debugger | None |
+
+The simulator entries require the `windows-debug` preset because the core-only
+preset does not build that executable. The tests entry follows the active preset:
+use `windows-debug` for the complete host suite or `windows-core-debug` for the
+portable suite without host HTTP code.
+
+Before starting either HTTP-monitor profile, run its local upstream fixture in a
+separate terminal:
+
+```powershell
+python .\tools\mock-health-server.py
+```
+
+The shared development bearer token used by the relevant profiles is
+`pixelstatus-vs-debug`. It is deliberately non-secret and is valid only for the
+locally launched debug process.
+
+Visual Studio normally discovers root launch profiles automatically. If they are
+hidden, choose **Show/Hide Debug Targets** from the Startup Item dropdown. A local
+`.vs\launch.vs.json` takes precedence over root entries with the same name; the
+repository intentionally leaves `.vs` ignored because it also contains per-user
+indexes and workspace state.
+
 After building, run the repeatable simulator/API integration smoke test with:
 
 ```powershell
@@ -43,6 +81,21 @@ configured Win32 simulator publishes its JSON-derived state through the status A
 
 ```powershell
 .\tools\test-host-monitor.ps1
+```
+
+The browser-display smoke test runs the renderer headlessly and verifies its HTML,
+manifest, and current-frame API:
+
+```powershell
+.\tools\test-web-display.ps1
+```
+
+The concurrency smoke test holds one local HTTP request for 2.5 seconds and verifies
+that a second worker publishes the fast monitor immediately while the status API and
+browser display remain responsive:
+
+```powershell
+.\tools\test-monitor-concurrency.ps1
 ```
 
 Python is used only for the mock upstream endpoint; the monitor implementation and
@@ -81,7 +134,18 @@ The simulator also accepts:
 --api-port N        listen on a different loopback port (default: 8787)
 --api-token TOKEN   use a stable development bearer token
 --no-api            disable the HTTP status input
+--web-display-port N          browser-display port (default: 8788)
+--web-display-bind ADDRESS    browser-display interface (default: 127.0.0.1)
+--web-refresh-ms N            default browser polling period (16–300000 ms)
+--no-web-display              disable browser output
+--no-window                   run without the native Win32 output
+--monitor-workers N           bounded pull-monitor workers (default: 2, maximum: 8)
 ```
+
+The browser display is available at `http://127.0.0.1:8788/` by default. It can run
+beside the native window or as the only output with `--no-window`. See
+[Browser Display Backend](http-display.md) for its read-only frame API, refresh
+control, responsive scaling, and standalone-window behavior.
 
 ## Push Statuses From the Host
 
@@ -132,9 +196,12 @@ publication, TTL, and rendering. See [Host Monitor Engine](monitor-engine.md) fo
 comparison and scheduling semantics.
 
 The simulator automatically registers an optional `monitors` array from its JSON
-configuration and executes those monitors serially on a background thread. See
+configuration and executes those monitors with a bounded background worker pool.
+Each configured monitor can have only one request in flight at a time. See
 [`http-monitor.example.json`](../examples/http-monitor.example.json) for a complete
-configuration targeting a local test endpoint.
+single-monitor configuration and
+[`concurrent-monitors.example.json`](../examples/concurrent-monitors.example.json)
+for the deterministic slow/fast fixture.
 
 The simulator supports:
 
@@ -143,14 +210,16 @@ The simulator supports:
 - a periodic status transition;
 - TTL expiration into the distinct `stale` status;
 - authenticated status pushes over a loopback HTTP endpoint;
+- native Win32 and responsive browser outputs fed by the same logical frames;
 - frame submission through the production `OutputDriver` interface.
 
 ## Driver Equivalence
 
-The renderer knows only the `OutputDriver` contract. The Win32 simulator copies and
-coalesces submitted logical frames in the same way that a slow BLE driver may need
-to do. A future SDL, browser-proxy, direct-LED, or MI BLE implementation can replace
-the current driver without changing state, appearance, layout, or renderer code.
+The renderer knows only the `OutputDriver` contract. The Win32 and HTTP display
+drivers independently copy and coalesce submitted logical frames in the same way
+that a slow BLE driver may need to do. A future SDL, direct-LED, or MI BLE
+implementation can replace either driver without changing state, appearance,
+layout, or renderer code.
 
 The HTTP transport is similarly thin: it translates native HTTP requests into the
 portable `StatusApi` request/response contract. The validation and state-update

@@ -7,6 +7,7 @@
 #include <cstddef>
 #include <limits>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <vector>
@@ -56,13 +57,14 @@ public:
         std::size_t maximum_runs = std::numeric_limits<std::size_t>::max());
 
     [[nodiscard]] std::optional<TimePoint> next_due(const std::string& id) const;
-    [[nodiscard]] std::size_t size() const noexcept;
+    [[nodiscard]] std::size_t size() const;
 
 private:
     struct Job;
 
     StateStore& states_;
     Evaluator evaluator_;
+    mutable std::mutex mutex_;
     std::vector<std::unique_ptr<Job>> jobs_;
 };
 

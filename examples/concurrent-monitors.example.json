@@ -1,0 +1,88 @@
+{
+  "schema_version": 1,
+  "display": {
+    "width": 2,
+    "height": 1,
+    "background": "#000000"
+  },
+  "statuses": {
+    "ok": {
+      "appearance": {
+        "solid": "#00C853"
+      }
+    },
+    "communication_failure": {
+      "appearance": {
+        "solid": "#FF00FF"
+      }
+    },
+    "stale": {
+      "appearance": {
+        "solid": "#FF9100"
+      }
+    },
+    "unknown": {
+      "appearance": {
+        "solid": "#6200EA"
+      }
+    }
+  },
+  "monitors": [
+    {
+      "id": "a-slow",
+      "type": "http",
+      "url": "http://127.0.0.1:18080/slow",
+      "interval": "10s",
+      "ttl": "30s",
+      "timeout": "4s",
+      "maximum_response_bytes": 4096,
+      "observe": {
+        "json_pointer": "/value"
+      },
+      "evaluate": [
+        {
+          "otherwise": {
+            "status": "ok"
+          }
+        }
+      ]
+    },
+    {
+      "id": "b-fast",
+      "type": "http",
+      "url": "http://127.0.0.1:18080/fast",
+      "interval": "10s",
+      "ttl": "30s",
+      "timeout": "1s",
+      "maximum_response_bytes": 4096,
+      "observe": {
+        "json_pointer": "/value"
+      },
+      "evaluate": [
+        {
+          "otherwise": {
+            "status": "ok"
+          }
+        }
+      ]
+    }
+  ],
+  "indicators": [
+    {
+      "id": "slow-indicator",
+      "source": "a-slow",
+      "x": 0,
+      "y": 0,
+      "width": 1,
+      "height": 1
+    },
+    {
+      "id": "fast-indicator",
+      "source": "b-fast",
+      "x": 1,
+      "y": 0,
+      "width": 1,
+      "height": 1
+    }
+  ]
+}

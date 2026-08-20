@@ -13,6 +13,7 @@ struct MonitorEngine::Job {
     MonitorDefinition definition;
     std::unique_ptr<MonitorRunner> runner;
     TimePoint next_due{};
+    bool in_flight{};
 };
 
 MonitorEngine::MonitorEngine(StateStore& states) : states_(states) {}
@@ -35,6 +36,11 @@ MonitorRegistrationResult MonitorEngine::add(
     if (!runner) {
         return {false, "monitor runner is required"};
     }
+    if (const auto error = evaluator_.validate(definition.evaluation)) {
+        return {false, *error};
+    }
+
+    std::scoped_lock lock(mutex_);
     if (jobs_.size() >= maximum_monitor_count) {
         return {false, "monitor limit reached"};
     }
@@ -43,14 +49,11 @@ MonitorRegistrationResult MonitorEngine::add(
         })) {
         return {false, "monitor id is already registered"};
     }
-    if (const auto error = evaluator_.validate(definition.evaluation)) {
-        return {false, *error};
-    }
-
     jobs_.push_back(std::make_unique<Job>(Job{
         std::move(definition),
         std::move(runner),
         first_due,
+        false,
     }));
     return {true, {}};
 }
@@ -58,25 +61,32 @@ MonitorRegistrationResult MonitorEngine::add(
 MonitorPumpReport MonitorEngine::run_due(TimePoint now, std::size_t maximum_runs) {
     MonitorPumpReport report;
     std::vector<Job*> due;
-    for (const auto& job : jobs_) {
-        if (job->next_due <= now) {
-            due.push_back(job.get());
+    {
+        std::scoped_lock lock(mutex_);
+        for (const auto& job : jobs_) {
+            if (!job->in_flight && job->next_due <= now) {
+                due.push_back(job.get());
+            }
+        }
+        std::sort(due.begin(), due.end(), [](const Job* left, const Job* right) {
+            if (left->next_due != right->next_due) {
+                return left->next_due < right->next_due;
+            }
+            return left->definition.id < right->definition.id;
+        });
+
+        report.due = due.size();
+        due.resize(std::min(maximum_runs, due.size()));
+        for (auto* job : due) {
+            const auto overdue = std::chrono::duration_cast<Duration>(now - job->next_due);
+            const auto periods = overdue.count() / job->definition.interval.count() + 1;
+            job->next_due += job->definition.interval * periods;
+            job->in_flight = true;
         }
     }
-    std::sort(due.begin(), due.end(), [](const Job* left, const Job* right) {
-        if (left->next_due != right->next_due) {
-            return left->next_due < right->next_due;
-        }
-        return left->definition.id < right->definition.id;
-    });
 
-    report.due = due.size();
-    const auto run_count = std::min(maximum_runs, due.size());
-    for (std::size_t index = 0; index < run_count; ++index) {
+    for (std::size_t index = 0; index < due.size(); ++index) {
         auto& job = *due[index];
-        const auto overdue = std::chrono::duration_cast<Duration>(now - job.next_due);
-        const auto periods = overdue.count() / job.definition.interval.count() + 1;
-        job.next_due += job.definition.interval * periods;
         ++report.executed;
 
         MonitorResult result;
@@ -94,31 +104,43 @@ MonitorPumpReport MonitorEngine::run_due(TimePoint now, std::size_t maximum_runs
             ++report.runner_exceptions;
         }
 
-        if (!result.transport_success) {
-            ++report.transport_failures;
-            if (result.detail.empty()) {
-                result.detail = std::string(monitor_error_name(result.error));
+        try {
+            if (!result.transport_success) {
+                ++report.transport_failures;
+                if (result.detail.empty()) {
+                    result.detail = std::string(monitor_error_name(result.error));
+                }
             }
-        }
-        const auto outcome = evaluator_.evaluate(result, job.definition.evaluation);
-        const auto observed_at = result.observed_at.value_or(now);
+            const auto outcome = evaluator_.evaluate(result, job.definition.evaluation);
+            const auto observed_at = result.observed_at.value_or(now);
 
-        MonitorState state;
-        state.id = job.definition.id;
-        state.status = outcome.status;
-        state.value = std::move(result.value);
-        state.message = std::move(result.detail);
-        state.observed_at = observed_at;
-        state.updated_at = observed_at;
-        state.ttl = job.definition.ttl;
-        if (states_.upsert(std::move(state))) {
-            ++report.state_updates;
+            MonitorState state;
+            state.id = job.definition.id;
+            state.status = outcome.status;
+            state.value = std::move(result.value);
+            state.message = std::move(result.detail);
+            state.observed_at = observed_at;
+            state.updated_at = observed_at;
+            state.ttl = job.definition.ttl;
+            if (states_.upsert(std::move(state))) {
+                ++report.state_updates;
+            }
+        } catch (...) {
+            std::scoped_lock lock(mutex_);
+            for (auto reset_index = index; reset_index < due.size(); ++reset_index) {
+                due[reset_index]->in_flight = false;
+            }
+            throw;
         }
+
+        std::scoped_lock lock(mutex_);
+        job.in_flight = false;
     }
     return report;
 }
 
 std::optional<TimePoint> MonitorEngine::next_due(const std::string& id) const {
+    std::scoped_lock lock(mutex_);
     const auto found = std::find_if(jobs_.begin(), jobs_.end(), [&id](const auto& job) {
         return job->definition.id == id;
     });
@@ -128,7 +150,8 @@ std::optional<TimePoint> MonitorEngine::next_due(const std::string& id) const {
     return (*found)->next_due;
 }
 
-std::size_t MonitorEngine::size() const noexcept {
+std::size_t MonitorEngine::size() const {
+    std::scoped_lock lock(mutex_);
     return jobs_.size();
 }
 
