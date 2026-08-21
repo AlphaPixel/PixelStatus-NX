@@ -804,6 +804,47 @@
         }
       ]
     },
+    "layoutWidget": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "type", "source", "x", "y", "width", "height"],
+          "properties": {
+            "id": {"$ref": "#/$defs/identifier"},
+            "type": {"const": "indicator"},
+            "source": {"$ref": "#/$defs/identifier"},
+            "x": {"type": "integer", "minimum": 0, "maximum": 256},
+            "y": {"type": "integer", "minimum": 0, "maximum": 256},
+            "width": {"type": "integer", "minimum": 1, "maximum": 256},
+            "height": {"type": "integer", "minimum": 1, "maximum": 256}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "type",
+            "timezone",
+            "x",
+            "y",
+            "width",
+            "height"
+          ],
+          "properties": {
+            "id": {"$ref": "#/$defs/identifier"},
+            "type": {"const": "clock"},
+            "timezone": {"enum": ["local", "utc"]},
+            "color": {"$ref": "#/$defs/color"},
+            "x": {"type": "integer", "minimum": 0, "maximum": 256},
+            "y": {"type": "integer", "minimum": 0, "maximum": 256},
+            "width": {"type": "integer", "minimum": 15, "maximum": 256},
+            "height": {"type": "integer", "minimum": 7, "maximum": 256}
+          }
+        }
+      ]
+    },
     "card": {
       "oneOf": [
         {
@@ -865,6 +906,23 @@
               "minItems": 1,
               "maxItems": 1024,
               "items": {"$ref": "#/$defs/indicator"}
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "type", "hold", "widgets"],
+          "properties": {
+            "id": {"$ref": "#/$defs/identifier"},
+            "type": {"const": "layout"},
+            "hold": {"$ref": "#/$defs/positiveDuration"},
+            "transition": {"$ref": "#/$defs/cardTransition"},
+            "widgets": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 1024,
+              "items": {"$ref": "#/$defs/layoutWidget"}
             }
           }
         }

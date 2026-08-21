@@ -1,0 +1,56 @@
+# Development Roadmap
+
+This roadmap preserves the host-first development strategy: configuration,
+monitoring, layout, and framebuffer behavior are completed and regression-tested on
+Windows before adding Bluetooth or ESP32 toolchains. Estimates are active engineering
+time and exclude delays obtaining credentials, network access, or physical hardware.
+
+| Stage | Estimate | Deliverable | Exit gate |
+| --- | ---: | --- | --- |
+| 0. Host monitoring foundation | Complete | Portable state/rendering core; Win32 and browser outputs; HTTP(S), TCP, DNS, and ICMP host monitors | Public tests and the ignored local operations deck pass |
+| 1. Explicit-AABB composite cards | 2–3 days | Additive `layout` card containing bounded indicator and one-line local/UTC clock widgets | Schema, parser, renderer, example, and deterministic portable tests agree |
+| 2. Split layout and richer widgets | 4–6 days | Row/column weighted splits with gaps, horizontal/vertical utilization bars, status grids, and bounded bitmap regions | The proposed 16×16 storage/WAN/VPS/UTC card renders from synthetic states without hand-calculated child coordinates |
+| 3. Live composite operations deck | 2–4 days | Apply the layout system to the local deck and exercise transitions, stale states, and failures through Win32 and browser outputs | A repeatable live smoke test observes every composite region and transition |
+| 4. Appliance data adapters | 5–8 days | Read-only TrueNAS and UniFi integrations, followed by the best available Netgear and Starlink signals | Real pool/disk/WAN values drive the same tested widgets; credentials remain named secrets |
+| 5. Windows Bluetooth hardware path | 5–8 days plus device sessions | Send PixelStatus framebuffers from Windows to the physical MI display | Calibration, block writes, pacing, reconnect, and complete-frame restoration are device-validated |
+| 6. Bluetooth output hardening | 3–5 days | Frame coalescing, sparse/full-frame policy, health reporting, and soak tests | Slow or disconnected BLE never blocks rendering and the newest complete frame wins |
+| 7. ESP32 production port | 8–15 days | ESP-IDF application using the portable core and a native NimBLE central/GATT output transport | The same configuration and golden frames pass on host and hardware without Python in firmware |
+
+## Stage 1: Explicit-AABB Composite Cards
+
+Status: complete on the Windows host and portable core test targets as of 2026-08-21.
+
+A `layout` card is an ordered list
+of widgets with explicit `x`, `y`, `width`, and `height` bounds. The first widget
+types are:
+
+- `indicator`, which paints a status appearance from a named state source;
+- `clock`, which paints one centered 15×7 local or UTC time inside its bounds.
+
+All bounds are checked while loading configuration. Existing `bitmap`, `clock`, and
+`indicators` cards remain valid. Widget order is paint order, permitting deliberate
+overlays while keeping non-overlapping subsections straightforward.
+
+Stage 2 will treat explicit AABBs as the canonical resolved form. Row/column or
+Mondrian-style splitting is configuration convenience that deterministically
+produces those bounds; output drivers never interpret layout trees.
+
+## Stage 5: Windows Bluetooth Hardware Path
+
+The first Windows hardware pass uses Python and `bleak` as a diagnostic transport,
+not as production firmware. It will consume the current PixelStatus framebuffer,
+discover `MI Matrix Display`, and validate the documented GATT protocol on the actual
+display. Required experiments are:
+
+1. corner, rotation, mirroring, pixel-order, and RGB-order calibration;
+2. eight-block full-frame writes and negotiated write-size behavior;
+3. write-with-response versus write-without-response pacing;
+4. graffiti/block mode switching and an evidence-based crossover threshold;
+5. disconnect, reconnect, and restoration of the newest complete frame.
+
+The quickest usable bridge can poll the read-only display-frame API and forward
+frames with `bleak`. If long-running Windows deployment is valuable after protocol
+validation, a native C++/WinRT BLE output driver can replace the Python transport
+without changing monitoring, layout, renderer, or framebuffer contracts. The later
+ESP32 driver reuses packet vectors and behavioral evidence through ESP-IDF NimBLE,
+not the Windows transport implementation.

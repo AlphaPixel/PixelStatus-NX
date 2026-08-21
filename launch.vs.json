@@ -208,6 +208,22 @@
       ]
     },
     {
+      "name": "Simulator - AABB Layout Card",
+      "projectTarget": "pixelstatus_simulator.exe (Debug\\pixelstatus_simulator.exe)",
+      "program": "${cmake.binaryDir}/Debug/pixelstatus_simulator.exe",
+      "args": [
+        "${workspaceRoot}/examples/layout-card.example.json",
+        "--api-token",
+        "pixelstatus-vs-debug",
+        "--api-port",
+        "18917",
+        "--web-display-port",
+        "18918",
+        "--web-refresh-ms",
+        "33"
+      ]
+    },
+    {
       "name": "Simulator - Local Operations",
       "projectTarget": "pixelstatus_simulator.exe (Debug\\pixelstatus_simulator.exe)",
       "program": "${cmake.binaryDir}/Debug/pixelstatus_simulator.exe",

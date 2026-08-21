@@ -76,6 +76,53 @@ push-state IDs.
 }
 ```
 
+## Explicit-AABB Layout Cards
+
+A `layout` card composes different widget types in one frame. Every widget has
+explicit `x`, `y`, `width`, and `height` bounds, checked against the configured
+display while loading the file. Widgets render in array order, so a later widget may
+deliberately paint over an earlier one.
+
+The initial layout milestone supports status indicators and a one-line clock:
+
+```json
+{
+  "id": "composite-status",
+  "type": "layout",
+  "hold": "10s",
+  "widgets": [
+    {
+      "id": "router",
+      "type": "indicator",
+      "source": "router",
+      "x": 0,
+      "y": 0,
+      "width": 3,
+      "height": 7
+    },
+    {
+      "id": "utc",
+      "type": "clock",
+      "timezone": "utc",
+      "color": "#FFD600",
+      "x": 0,
+      "y": 9,
+      "width": 16,
+      "height": 7
+    }
+  ]
+}
+```
+
+Clock widget bounds must be at least 15×7 pixels. The glyph is centered when the
+bounds are larger. `timezone` is `local` or `utc`; omitted colors default to blue
+for local time and yellow for UTC. Widget IDs are unique within their card.
+
+[`layout-card.example.json`](../examples/layout-card.example.json) is a runnable
+16×16 composite example. Weighted row/column splitting, utilization bars, status
+grids, and bounded bitmaps are the next layout milestone; they will resolve to the
+same explicit AABB representation before rendering.
+
 ## Real-Monitor Starter Deck
 
 [`card-deck.example.json`](../examples/card-deck.example.json) is a runnable 16×16

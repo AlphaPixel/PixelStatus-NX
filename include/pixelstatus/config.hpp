@@ -58,10 +58,32 @@ struct IndicatorCardConfig {
     std::vector<IndicatorConfig> indicators;
 };
 
+enum class ClockTimeZone {
+    local,
+    utc,
+};
+
+struct LayoutClockConfig {
+    std::string id;
+    std::size_t x{};
+    std::size_t y{};
+    std::size_t width{15};
+    std::size_t height{7};
+    ClockTimeZone timezone{ClockTimeZone::local};
+    Rgb color{0x00, 0xB0, 0xFF};
+};
+
+using LayoutWidgetConfig = std::variant<IndicatorConfig, LayoutClockConfig>;
+
+struct LayoutCardConfig {
+    std::vector<LayoutWidgetConfig> widgets;
+};
+
 using CardContentConfig = std::variant<
     BitmapCardConfig,
     ClockCardConfig,
-    IndicatorCardConfig>;
+    IndicatorCardConfig,
+    LayoutCardConfig>;
 
 struct CardConfig {
     std::string id;

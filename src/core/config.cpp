@@ -22,6 +22,7 @@ constexpr std::size_t maximum_config_bytes = 1024U * 1024U;
 constexpr std::size_t maximum_dimension = 256U;
 constexpr std::size_t maximum_pixels = 65'536U;
 constexpr std::size_t maximum_indicators = 1'024U;
+constexpr std::size_t maximum_layout_widgets = 1'024U;
 constexpr std::size_t maximum_cards = 32U;
 constexpr std::size_t maximum_bitmap_palette_entries = 32U;
 constexpr std::size_t maximum_statuses = 256U;
@@ -1442,16 +1443,25 @@ struct ParsedSteps {
     const Json& item,
     std::string_view path,
     const DisplayConfig& display,
-    ConfigLoadResult& result) {
+    ConfigLoadResult& result,
+    bool allow_type = false) {
     if (!item.is_object()) {
         add_error(result, std::string(path) + " must be an object");
         return std::nullopt;
     }
-    reject_unknown_fields(
-        item,
-        {"id", "source", "x", "y", "width", "height"},
-        path,
-        result);
+    if (allow_type) {
+        reject_unknown_fields(
+            item,
+            {"id", "type", "source", "x", "y", "width", "height"},
+            path,
+            result);
+    } else {
+        reject_unknown_fields(
+            item,
+            {"id", "source", "x", "y", "width", "height"},
+            path,
+            result);
+    }
 
     const auto id = required_identifier(item, "id", path, result);
     const auto source = required_identifier(item, "source", path, result);
@@ -1468,6 +1478,95 @@ struct ParsedSteps {
         return std::nullopt;
     }
     return IndicatorConfig{*id, *source, *x, *y, *width, *height};
+}
+
+[[nodiscard]] std::optional<LayoutClockConfig> parse_layout_clock_config(
+    const Json& item,
+    std::string_view path,
+    const DisplayConfig& display,
+    ConfigLoadResult& result) {
+    reject_unknown_fields(
+        item,
+        {"id", "type", "x", "y", "width", "height", "timezone", "color"},
+        path,
+        result);
+    const auto id = required_identifier(item, "id", path, result);
+    const auto x = bounded_size(item, "x", path, 0, maximum_dimension, result);
+    const auto y = bounded_size(item, "y", path, 0, maximum_dimension, result);
+    const auto width = bounded_size(item, "width", path, 1, maximum_dimension, result);
+    const auto height = bounded_size(item, "height", path, 1, maximum_dimension, result);
+    const auto timezone = required_string(item, "timezone", path, result);
+    if (!id || !x || !y || !width || !height || !timezone) {
+        return std::nullopt;
+    }
+    if (*x >= display.width || *width > display.width - *x
+        || *y >= display.height || *height > display.height - *y) {
+        add_error(result, std::string(path) + " extends outside the configured display");
+        return std::nullopt;
+    }
+    if (*width < 15U || *height < 7U) {
+        add_error(result, std::string(path) + " requires bounds of at least 15x7 pixels");
+        return std::nullopt;
+    }
+
+    LayoutClockConfig clock;
+    clock.id = *id;
+    clock.x = *x;
+    clock.y = *y;
+    clock.width = *width;
+    clock.height = *height;
+    if (*timezone == "local") {
+        clock.timezone = ClockTimeZone::local;
+        clock.color = {0x00, 0xB0, 0xFF};
+    } else if (*timezone == "utc") {
+        clock.timezone = ClockTimeZone::utc;
+        clock.color = {0xFF, 0xD6, 0x00};
+    } else {
+        add_error(result, std::string(path) + ".timezone must be local or utc");
+        return std::nullopt;
+    }
+    if (const auto field = item.find("color"); field != item.end()) {
+        const auto parsed = color_value(*field, std::string(path) + ".color", result);
+        if (!parsed) {
+            return std::nullopt;
+        }
+        clock.color = *parsed;
+    }
+    return clock;
+}
+
+[[nodiscard]] std::optional<LayoutWidgetConfig> parse_layout_widget(
+    const Json& item,
+    std::string_view path,
+    const DisplayConfig& display,
+    ConfigLoadResult& result) {
+    if (!item.is_object()) {
+        add_error(result, std::string(path) + " must be an object");
+        return std::nullopt;
+    }
+    const auto type = required_string(item, "type", path, result);
+    if (!type) {
+        return std::nullopt;
+    }
+    if (*type == "indicator") {
+        if (auto indicator = parse_indicator_config(item, path, display, result, true)) {
+            return LayoutWidgetConfig{std::move(*indicator)};
+        }
+        return std::nullopt;
+    }
+    if (*type == "clock") {
+        if (auto clock = parse_layout_clock_config(item, path, display, result)) {
+            return LayoutWidgetConfig{std::move(*clock)};
+        }
+        return std::nullopt;
+    }
+    reject_unknown_fields(
+        item,
+        {"id", "type", "source", "x", "y", "width", "height", "timezone", "color"},
+        path,
+        result);
+    add_error(result, std::string(path) + ".type must be indicator or clock");
+    return std::nullopt;
 }
 
 [[nodiscard]] std::optional<CardTransitionConfig> parse_card_transition(
@@ -1718,15 +1817,60 @@ struct ParsedSteps {
         return card;
     }
 
+    if (*type == "layout") {
+        reject_unknown_fields(
+            item,
+            {"id", "type", "hold", "transition", "widgets"},
+            path,
+            result);
+        const auto widgets = item.find("widgets");
+        if (widgets == item.end() || !widgets->is_array()
+            || widgets->empty() || widgets->size() > maximum_layout_widgets) {
+            add_error(
+                result,
+                std::string(path)
+                    + ".widgets must contain between 1 and 1024 entries");
+            return std::nullopt;
+        }
+        LayoutCardConfig content;
+        std::unordered_set<std::string> ids;
+        for (std::size_t index = 0; index < widgets->size(); ++index) {
+            const auto widget_path = std::string(path) + ".widgets["
+                + std::to_string(index) + "]";
+            auto widget = parse_layout_widget(
+                (*widgets)[index], widget_path, display, result);
+            if (!widget) {
+                continue;
+            }
+            const auto& widget_id = std::visit(
+                [](const auto& value) -> const std::string& { return value.id; },
+                *widget);
+            if (!ids.insert(widget_id).second) {
+                add_error(
+                    result,
+                    widget_path + ".id duplicates an earlier widget on this card");
+                continue;
+            }
+            content.widgets.push_back(std::move(*widget));
+        }
+        if (content.widgets.size() != widgets->size()) {
+            return std::nullopt;
+        }
+        card.content = std::move(content);
+        return card;
+    }
+
     reject_unknown_fields(
         item,
         {
             "id", "type", "hold", "transition", "palette", "pixels",
-            "local_color", "utc_color", "indicators",
+            "local_color", "utc_color", "indicators", "widgets",
         },
         path,
         result);
-    add_error(result, std::string(path) + ".type must be bitmap, clock, or indicators");
+    add_error(
+        result,
+        std::string(path) + ".type must be bitmap, clock, indicators, or layout");
     return std::nullopt;
 }
 
@@ -1916,7 +2060,7 @@ ConfigLoadResult load_config_file(const std::filesystem::path& path) {
             add_error(result, "cards must be an array with between 1 and 32 entries");
         } else {
             std::unordered_set<std::string> ids;
-            std::size_t total_indicators{};
+            std::size_t total_widgets{};
             for (std::size_t index = 0; index < cards->size(); ++index) {
                 const auto path_text =
                     std::string("cards[") + std::to_string(index) + "]";
@@ -1931,13 +2075,16 @@ ConfigLoadResult load_config_file(const std::filesystem::path& path) {
                 }
                 if (const auto* content =
                         std::get_if<IndicatorCardConfig>(&card->content)) {
-                    total_indicators += content->indicators.size();
-                    if (total_indicators > maximum_indicators) {
-                        add_error(
-                            result,
-                            "cards contain more than 1024 indicators in total");
-                        continue;
-                    }
+                    total_widgets += content->indicators.size();
+                } else if (const auto* layout_content =
+                               std::get_if<LayoutCardConfig>(&card->content)) {
+                    total_widgets += layout_content->widgets.size();
+                }
+                if (total_widgets > maximum_layout_widgets) {
+                    add_error(
+                        result,
+                        "cards contain more than 1024 widgets in total");
+                    continue;
                 }
                 config.cards.push_back(std::move(*card));
             }

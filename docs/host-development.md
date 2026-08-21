@@ -47,6 +47,7 @@ adds these shared entries to the **Startup Item** dropdown:
 | `Simulator - HTTP Request Monitor` | Authenticated JSON POST with custom headers and body | Status API `18877`, browser `18878` |
 | `Simulator - HTTPS Monitor` | Public HTTPS system-trust check | Status API `18887`, browser `18888` |
 | `Simulator - Card Deck (Real Monitors)` | Logo, local/UTC clock, LAN/WAN, and public-server cards | Status API `18897`, browser `18898` |
+| `Simulator - AABB Layout Card` | Composite status regions and a bounded UTC clock | Status API `18917`, browser `18918` |
 | `Simulator - Local Operations` | Optional ignored site-specific profile | Status API `18907`, browser `18908` |
 | `Simulator - Concurrent HTTP Monitors` | Headless two-monitor slow/fast concurrency example | Status API `18837`, browser `18838` |
 | `Simulator - TCP Connect Monitor` | Headless TCP-connect latency example | Status API `18847`, browser `18848` |
@@ -116,6 +117,13 @@ monitors to report healthy states:
 
 ```powershell
 .\tools\test-card-deck.ps1
+```
+
+The AABB layout-card smoke test verifies mixed status and clock widgets through the
+browser framebuffer API without network fixtures:
+
+```powershell
+.\tools\test-layout-card.ps1
 ```
 
 Site-specific monitoring can be exercised with the ignored

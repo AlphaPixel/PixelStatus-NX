@@ -50,12 +50,21 @@ std::vector<std::string> unique_sources(const pixelstatus::AppConfig& config) {
     for (const auto& card : config.cards) {
         const auto* content =
             std::get_if<pixelstatus::IndicatorCardConfig>(&card.content);
-        if (content == nullptr) {
-            continue;
+        if (content != nullptr) {
+            for (const auto& indicator : content->indicators) {
+                if (seen.insert(indicator.source).second) {
+                    sources.push_back(indicator.source);
+                }
+            }
         }
-        for (const auto& indicator : content->indicators) {
-            if (seen.insert(indicator.source).second) {
-                sources.push_back(indicator.source);
+        const auto* layout =
+            std::get_if<pixelstatus::LayoutCardConfig>(&card.content);
+        if (layout != nullptr) {
+            for (const auto& widget : layout->widgets) {
+                const auto* indicator = std::get_if<pixelstatus::IndicatorConfig>(&widget);
+                if (indicator != nullptr && seen.insert(indicator->source).second) {
+                    sources.push_back(indicator->source);
+                }
             }
         }
     }

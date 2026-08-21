@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "display": {
+    "width": 16,
+    "height": 16,
+    "background": "#02050A"
+  },
+  "statuses": {
+    "ok": {
+      "appearance": {"solid": "#00C853"}
+    },
+    "warn": {
+      "appearance": {"solid": "#FFD600"}
+    },
+    "fail": {
+      "appearance": {"blink": {"color": "#FF1744", "on": "500ms", "off": "500ms"}}
+    },
+    "stale": {
+      "appearance": {"solid": "#FF9100"}
+    },
+    "unknown": {
+      "appearance": {"solid": "#6200EA"}
+    }
+  },
+  "cards": [
+    {
+      "id": "composite-status",
+      "type": "layout",
+      "hold": "1h",
+      "widgets": [
+        {"id": "router", "type": "indicator", "source": "router", "x": 0, "y": 0, "width": 3, "height": 7},
+        {"id": "storage", "type": "indicator", "source": "storage", "x": 4, "y": 0, "width": 3, "height": 7},
+        {"id": "primary-wan", "type": "indicator", "source": "primary-wan", "x": 8, "y": 0, "width": 3, "height": 7},
+        {"id": "servers", "type": "indicator", "source": "servers", "x": 12, "y": 0, "width": 4, "height": 7},
+        {"id": "utc", "type": "clock", "timezone": "utc", "color": "#FFD600", "x": 0, "y": 9, "width": 16, "height": 7}
+      ]
+    }
+  ]
+}

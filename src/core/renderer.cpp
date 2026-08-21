@@ -32,6 +32,51 @@ void merge_report(RenderReport& target, const RenderReport& source) {
     }
 }
 
+bool render_indicator(
+    const StateStore& states,
+    const AppConfig& config,
+    const IndicatorConfig& indicator,
+    TimePoint now,
+    TimePoint animation_origin,
+    RenderReport& report,
+    Frame& output) {
+    const auto resolved = states.resolve(indicator.source, now);
+    std::string status = "unknown";
+    auto entered_at = animation_origin;
+    if (resolved) {
+        status = resolved->effective_status;
+        entered_at = resolved->status_entered_at;
+    } else {
+        ++report.missing_sources;
+    }
+
+    auto appearance = config.statuses.find(status);
+    if (appearance == config.statuses.end()) {
+        ++report.missing_statuses;
+        appearance = config.statuses.find("unknown");
+    }
+    if (appearance == config.statuses.end()) {
+        return true;
+    }
+
+    auto elapsed = std::chrono::duration_cast<Duration>(now - entered_at);
+    if (elapsed < Duration::zero()) {
+        elapsed = Duration::zero();
+    }
+    const auto color = appearance->second.sample(elapsed);
+    if (!output.fill_rect(
+            indicator.x,
+            indicator.y,
+            indicator.width,
+            indicator.height,
+            color)) {
+        report.error = "Indicator layout became invalid during rendering";
+        return false;
+    }
+    ++report.rendered_indicators;
+    return true;
+}
+
 RenderReport render_indicators(
     const StateStore& states,
     const AppConfig& config,
@@ -42,40 +87,10 @@ RenderReport render_indicators(
     RenderReport report;
     output.fill(config.display.background);
     for (const auto& indicator : indicators) {
-        const auto resolved = states.resolve(indicator.source, now);
-        std::string status = "unknown";
-        auto entered_at = animation_origin;
-        if (resolved) {
-            status = resolved->effective_status;
-            entered_at = resolved->status_entered_at;
-        } else {
-            ++report.missing_sources;
-        }
-
-        auto appearance = config.statuses.find(status);
-        if (appearance == config.statuses.end()) {
-            ++report.missing_statuses;
-            appearance = config.statuses.find("unknown");
-        }
-        if (appearance == config.statuses.end()) {
-            continue;
-        }
-
-        auto elapsed = std::chrono::duration_cast<Duration>(now - entered_at);
-        if (elapsed < Duration::zero()) {
-            elapsed = Duration::zero();
-        }
-        const auto color = appearance->second.sample(elapsed);
-        if (!output.fill_rect(
-                indicator.x,
-                indicator.y,
-                indicator.width,
-                indicator.height,
-                color)) {
-            report.error = "Indicator layout became invalid during rendering";
+        if (!render_indicator(
+                states, config, indicator, now, animation_origin, report, output)) {
             return report;
         }
-        ++report.rendered_indicators;
     }
     report.success = true;
     return report;
@@ -97,22 +112,36 @@ void draw_digit(
     }
 }
 
-void draw_time(
+bool draw_time(
     Frame& output,
+    std::size_t x,
     std::size_t y,
+    std::size_t width,
+    std::size_t height,
     int hour,
     int minute,
     bool show_colon,
     Rgb color) {
-    const auto x = (output.width() - 15U) / 2U;
-    draw_digit(output, x, y, static_cast<unsigned int>(hour / 10), color);
-    draw_digit(output, x + 3U, y, static_cast<unsigned int>(hour % 10), color);
-    if (show_colon) {
-        static_cast<void>(output.set_pixel(x + 7U, y + 2U, color));
-        static_cast<void>(output.set_pixel(x + 7U, y + 4U, color));
+    if (width < 15U || height < 7U || x >= output.width()
+        || width > output.width() - x || y >= output.height()
+        || height > output.height() - y) {
+        return false;
     }
-    draw_digit(output, x + 9U, y, static_cast<unsigned int>(minute / 10), color);
-    draw_digit(output, x + 12U, y, static_cast<unsigned int>(minute % 10), color);
+    const auto origin_x = x + (width - 15U) / 2U;
+    const auto origin_y = y + (height - 7U) / 2U;
+    draw_digit(
+        output, origin_x, origin_y, static_cast<unsigned int>(hour / 10), color);
+    draw_digit(
+        output, origin_x + 3U, origin_y, static_cast<unsigned int>(hour % 10), color);
+    if (show_colon) {
+        static_cast<void>(output.set_pixel(origin_x + 7U, origin_y + 2U, color));
+        static_cast<void>(output.set_pixel(origin_x + 7U, origin_y + 4U, color));
+    }
+    draw_digit(
+        output, origin_x + 9U, origin_y, static_cast<unsigned int>(minute / 10), color);
+    draw_digit(
+        output, origin_x + 12U, origin_y, static_cast<unsigned int>(minute % 10), color);
+    return true;
 }
 
 bool split_wall_time(
@@ -148,6 +177,55 @@ RenderReport render_card(
 
     RenderReport report;
     output.fill(config.display.background);
+    if (const auto* layout = std::get_if<LayoutCardConfig>(&card.content)) {
+        std::tm local{};
+        std::tm utc{};
+        bool wall_time_loaded{};
+        for (const auto& widget : layout->widgets) {
+            if (const auto* indicator = std::get_if<IndicatorConfig>(&widget)) {
+                if (!render_indicator(
+                        states,
+                        config,
+                        *indicator,
+                        now,
+                        animation_origin,
+                        report,
+                        output)) {
+                    return report;
+                }
+                continue;
+            }
+
+            const auto* clock = std::get_if<LayoutClockConfig>(&widget);
+            if (clock == nullptr) {
+                report.error = "Layout widget became invalid during rendering";
+                return report;
+            }
+            if (!wall_time_loaded) {
+                if (!split_wall_time(wall_now, local, utc)) {
+                    report.error = "Layout clock could not convert the current wall time";
+                    return report;
+                }
+                wall_time_loaded = true;
+            }
+            const auto& selected = clock->timezone == ClockTimeZone::local ? local : utc;
+            if (!draw_time(
+                    output,
+                    clock->x,
+                    clock->y,
+                    clock->width,
+                    clock->height,
+                    selected.tm_hour,
+                    selected.tm_min,
+                    selected.tm_sec % 2 == 0,
+                    clock->color)) {
+                report.error = "Layout clock bounds became invalid during rendering";
+                return report;
+            }
+        }
+        report.success = true;
+        return report;
+    }
     if (const auto* bitmap = std::get_if<BitmapCardConfig>(&card.content)) {
         for (std::size_t y = 0; y < bitmap->pixels.size(); ++y) {
             for (std::size_t x = 0; x < bitmap->pixels[y].size(); ++x) {
@@ -171,15 +249,26 @@ RenderReport render_card(
         return report;
     }
     const auto show_colon = local.tm_sec % 2 == 0;
-    draw_time(
-        output, 0U, local.tm_hour, local.tm_min, show_colon, clock->local_color);
-    draw_time(
+    static_cast<void>(draw_time(
         output,
+        0U,
+        0U,
+        output.width(),
+        7U,
+        local.tm_hour,
+        local.tm_min,
+        show_colon,
+        clock->local_color));
+    static_cast<void>(draw_time(
+        output,
+        0U,
         output.height() - 7U,
+        output.width(),
+        7U,
         utc.tm_hour,
         utc.tm_min,
         show_colon,
-        clock->utc_color);
+        clock->utc_color));
     report.success = true;
     return report;
 }

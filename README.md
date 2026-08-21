@@ -41,8 +41,9 @@ that expose no suitable application service.
 The same rendered framebuffer is also available through a responsive
 [Browser Display Backend](docs/http-display.md), including a read-only frame API and
 headless host mode.
-The renderer can cycle bitmap, two-line local/UTC clock, and live indicator cards
-through instant, fade, or four-direction slide transitions. See
+The renderer can cycle bitmap, two-line local/UTC clock, live indicator, and
+explicit-AABB composite cards through instant, fade, or four-direction slide
+transitions. See
 [Card Decks](docs/card-decks.md) and the runnable
 [`card-deck.example.json`](examples/card-deck.example.json).
 Site-specific monitor inventories belong in the ignored
@@ -52,6 +53,8 @@ The implemented WinHTTP/Schannel desktop TLS path, planned ESP32 TLS path, named
 secret handling, and integration requirements for TrueNAS CORE, UniFi, Netgear
 cable modems, and Starlink are described in
 [Appliance Monitoring and TLS](docs/appliance-monitoring.md).
+The staged host-layout, live-data, Windows Bluetooth, and eventual ESP32 work is
+tracked in the [Development Roadmap](docs/development-roadmap.md).
 
 ---
 
@@ -1929,8 +1932,10 @@ configuration validation behavior, output-driver ownership/backpressure contract
 and byte-level MI protocol test vectors. It does not require network monitors or
 physical display access.
 
-After the simulator path is verified, add the native MI BLE driver as the second
-output while keeping the same framebuffer and renderer contracts.
+After host rendering and layout are verified, validate the MI display from Windows
+with the Python/`bleak` reference transport. The later ESP32 stage replaces that
+diagnostic transport with native NimBLE while keeping the same framebuffer and
+renderer contracts.
 
 ---
 
@@ -2139,15 +2144,17 @@ Deliverable: configuration-to-pixels behavior that can be tested without hardwar
 Status: complete on the native Win32 target. The timeline compiler now covers the
 full initial appearance grammar, not only solid and blink.
 
-## Gate 3: MI Hardware Validation and Native Driver
+## Gate 3: Windows MI Hardware Validation and Bridge
 
 - run the Python calibration, block, MTU, response-mode, delay, and reconnect tests;
 - record results in the MI handoff;
-- implement the native NimBLE transport and MI packet encoder;
+- connect the Windows framebuffer output to the display through `bleak`;
 - add frame coalescing and conservative reconnect behavior;
 - enable sparse/full-frame selection only if the measurements justify it.
 
-Deliverable: the same simulator-rendered frames displayed on the MI matrix.
+Deliverable: the same simulator-rendered frames displayed on the physical MI matrix
+from Windows. A native C++/WinRT transport is optional; the production ESP32 NimBLE
+transport remains a later stage.
 
 ## Gate 4: First External State Input
 

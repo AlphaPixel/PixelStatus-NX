@@ -337,6 +337,61 @@ void test_clock_card_renderer() {
     CHECK((*frame.pixel(6U, 9U) == pixelstatus::Rgb{1U, 2U, 3U}));
 }
 
+void test_layout_card_renderer() {
+    const auto origin = pixelstatus::TimePoint{};
+    pixelstatus::AppConfig config;
+    config.display = {16U, 16U, {1U, 2U, 3U}};
+    config.statuses.emplace("ok", pixelstatus::TimelineAppearance::solid({0U, 255U, 0U}));
+    config.statuses.emplace(
+        "unknown", pixelstatus::TimelineAppearance::solid({255U, 0U, 255U}));
+    config.statuses.emplace(
+        "stale", pixelstatus::TimelineAppearance::solid({255U, 128U, 0U}));
+
+    pixelstatus::LayoutCardConfig layout;
+    layout.widgets.emplace_back(
+        pixelstatus::IndicatorConfig{"health", "service", 0U, 0U, 3U, 4U});
+    pixelstatus::LayoutClockConfig clock;
+    clock.id = "utc";
+    clock.x = 0U;
+    clock.y = 9U;
+    clock.width = 16U;
+    clock.height = 7U;
+    clock.timezone = pixelstatus::ClockTimeZone::utc;
+    clock.color = {255U, 214U, 0U};
+    layout.widgets.emplace_back(clock);
+
+    pixelstatus::CardConfig card;
+    card.id = "composite";
+    card.hold = 1s;
+    card.content = std::move(layout);
+    config.cards.push_back(std::move(card));
+
+    pixelstatus::StateStore states;
+    pixelstatus::MonitorState state;
+    state.id = "service";
+    state.status = "ok";
+    state.observed_at = origin;
+    state.updated_at = origin;
+    CHECK(states.upsert(std::move(state)));
+
+    pixelstatus::Frame frame(16U, 16U);
+    const pixelstatus::Renderer renderer(origin);
+    const auto report = renderer.render(
+        states,
+        config,
+        origin,
+        std::chrono::system_clock::time_point{},
+        frame);
+    CHECK(report.success);
+    CHECK(report.active_card == "composite");
+    CHECK(report.rendered_indicators == 1U);
+    CHECK((*frame.pixel(0U, 0U) == pixelstatus::Rgb{0U, 255U, 0U}));
+    CHECK((*frame.pixel(3U, 0U) == pixelstatus::Rgb{1U, 2U, 3U}));
+    CHECK((*frame.pixel(0U, 9U) == pixelstatus::Rgb{255U, 214U, 0U}));
+    CHECK((*frame.pixel(7U, 11U) == pixelstatus::Rgb{255U, 214U, 0U}));
+    CHECK((*frame.pixel(6U, 9U) == pixelstatus::Rgb{1U, 2U, 3U}));
+}
+
 void test_mi_protocol_vectors() {
     const auto pixel_zero = pixelstatus::mi::build_pixel_packet(0, {255, 0, 0});
     const pixelstatus::mi::PixelPacket expected_zero{
@@ -417,6 +472,36 @@ void test_card_deck_configuration() {
         loaded.config->cards[2].content));
     CHECK(loaded.config->cards[3].transition.type
           == pixelstatus::CardTransition::instant);
+}
+
+void test_layout_card_configuration() {
+    const auto path = std::filesystem::path(PIXELSTATUS_TEST_DATA_DIR)
+        / "layout-card.example.json";
+    const auto loaded = pixelstatus::load_config_file(path);
+    if (!loaded) {
+        for (const auto& error : loaded.errors) {
+            std::cerr << "layout card config error: " << error << '\n';
+        }
+    }
+    CHECK(loaded);
+    CHECK(loaded.config && loaded.config->cards.size() == 1U);
+    if (!loaded.config || loaded.config->cards.empty()) {
+        return;
+    }
+    const auto* layout = std::get_if<pixelstatus::LayoutCardConfig>(
+        &loaded.config->cards.front().content);
+    CHECK(layout != nullptr);
+    CHECK(layout && layout->widgets.size() == 5U);
+    if (!layout || layout->widgets.size() != 5U) {
+        return;
+    }
+    CHECK(std::holds_alternative<pixelstatus::IndicatorConfig>(layout->widgets[0]));
+    const auto* clock = std::get_if<pixelstatus::LayoutClockConfig>(
+        &layout->widgets[4]);
+    CHECK(clock != nullptr);
+    CHECK(clock && clock->timezone == pixelstatus::ClockTimeZone::utc);
+    CHECK(clock && clock->x == 0U && clock->y == 9U);
+    CHECK(clock && clock->width == 16U && clock->height == 7U);
 }
 
 void test_http_monitor_configuration() {
@@ -1244,6 +1329,81 @@ void test_configuration_rejects_invalid_card_deck() {
         }));
 }
 
+void test_configuration_rejects_invalid_layout_card() {
+    const auto path = std::filesystem::temp_directory_path()
+        / "pixelstatus-nx-invalid-layout-card-test.json";
+    {
+        std::ofstream output(path, std::ios::binary | std::ios::trunc);
+        output << R"({
+            "schema_version": 1,
+            "display": {"width": 16, "height": 16},
+            "statuses": {
+                "unknown": {"appearance": {"solid": "#000000"}},
+                "stale": {"appearance": {"solid": "#000000"}}
+            },
+            "cards": [
+                {
+                    "id": "layout",
+                    "type": "layout",
+                    "hold": "1s",
+                    "widgets": [
+                        {
+                            "id": "utc",
+                            "type": "clock",
+                            "timezone": "utc",
+                            "x": 0,
+                            "y": 9,
+                            "width": 14,
+                            "height": 7
+                        },
+                        {
+                            "id": "outside",
+                            "type": "indicator",
+                            "source": "outside",
+                            "x": 15,
+                            "y": 0,
+                            "width": 2,
+                            "height": 1
+                        },
+                        {
+                            "id": "duplicate",
+                            "type": "indicator",
+                            "source": "first",
+                            "x": 0,
+                            "y": 0,
+                            "width": 1,
+                            "height": 1
+                        },
+                        {
+                            "id": "duplicate",
+                            "type": "indicator",
+                            "source": "second",
+                            "x": 1,
+                            "y": 0,
+                            "width": 1,
+                            "height": 1
+                        }
+                    ]
+                }
+            ]
+        })";
+    }
+
+    const auto loaded = pixelstatus::load_config_file(path);
+    std::error_code ignored;
+    std::filesystem::remove(path, ignored);
+    CHECK(!loaded);
+    const auto errors_contain = [&loaded](std::string_view text) {
+        return std::any_of(
+            loaded.errors.begin(), loaded.errors.end(), [text](const auto& error) {
+                return error.find(text) != std::string::npos;
+            });
+    };
+    CHECK(errors_contain("at least 15x7"));
+    CHECK(errors_contain("extends outside"));
+    CHECK(errors_contain("duplicates an earlier widget"));
+}
+
 #ifdef PIXELSTATUS_TEST_HOST_HTTP
 
 struct BlockingRunnerProbe {
@@ -2060,9 +2220,11 @@ int main() {
     test_card_deck_renderer();
     test_card_deck_slide_directions();
     test_clock_card_renderer();
+    test_layout_card_renderer();
     test_mi_protocol_vectors();
     test_sample_configuration();
     test_card_deck_configuration();
+    test_layout_card_configuration();
     test_http_monitor_configuration();
     test_http_request_configuration();
     test_tcp_connect_monitor_configuration();
@@ -2070,6 +2232,7 @@ int main() {
     test_tcp_exchange_monitor_configuration();
     test_configuration_rejects_unknown_fields();
     test_configuration_rejects_invalid_card_deck();
+    test_configuration_rejects_invalid_layout_card();
     test_configuration_rejects_invalid_identifiers();
     test_configuration_rejects_invalid_monitor();
     test_configuration_rejects_invalid_tcp_monitor();
