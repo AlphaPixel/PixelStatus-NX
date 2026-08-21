@@ -68,6 +68,7 @@ if(PIXELSTATUS_BUILD_HOST_HTTP)
         src/host/dns_monitor_runner.cpp
         src/host/http_display_driver.cpp
         src/host/http_monitor_runner.cpp
+        src/host/icmp_ping_monitor_runner.cpp
         src/host/monitor_executor.cpp
         src/host/monitor_runner_factory.cpp
         src/host/secret_resolver.cpp
@@ -85,7 +86,7 @@ if(PIXELSTATUS_BUILD_HOST_HTTP)
         target_sources(pixelstatus_host PRIVATE
             src/host/winhttp_http_transport.cpp
         )
-        target_link_libraries(pixelstatus_host PRIVATE advapi32 winhttp ws2_32)
+        target_link_libraries(pixelstatus_host PRIVATE advapi32 iphlpapi winhttp ws2_32)
         target_compile_definitions(pixelstatus_host PRIVATE
             NOMINMAX
             WIN32_LEAN_AND_MEAN

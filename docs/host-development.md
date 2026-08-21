@@ -47,6 +47,7 @@ adds these shared entries to the **Startup Item** dropdown:
 | `Simulator - HTTP Request Monitor` | Authenticated JSON POST with custom headers and body | Status API `18877`, browser `18878` |
 | `Simulator - HTTPS Monitor` | Public HTTPS system-trust check | Status API `18887`, browser `18888` |
 | `Simulator - Card Deck (Real Monitors)` | Logo, local/UTC clock, LAN/WAN, and public-server cards | Status API `18897`, browser `18898` |
+| `Simulator - Local Operations` | Optional ignored site-specific profile | Status API `18907`, browser `18908` |
 | `Simulator - Concurrent HTTP Monitors` | Headless two-monitor slow/fast concurrency example | Status API `18837`, browser `18838` |
 | `Simulator - TCP Connect Monitor` | Headless TCP-connect latency example | Status API `18847`, browser `18848` |
 | `Simulator - DNS Monitor` | Headless localhost IPv4 resolution example | Status API `18857`, browser `18858` |
@@ -116,6 +117,16 @@ monitors to report healthy states:
 ```powershell
 .\tools\test-card-deck.ps1
 ```
+
+Site-specific monitoring can be exercised with the ignored
+`examples\operations.local.json` profile and its ignored companion test:
+
+```powershell
+.\tools\test-operations.local.ps1
+```
+
+Both paths are intentionally excluded from Git. Keep LAN addresses, private
+hostnames, credentials, and environment-specific assertions in those local files.
 
 The browser-display smoke test runs the renderer headlessly and verifies its HTML,
 manifest, and current-frame API:
@@ -247,8 +258,8 @@ See [Configuration V1](configuration-v1.md) for the status and appearance model.
 
 The core library contains host-tested runner, evaluator, and deterministic
 interval-engine contracts. Scripted runners exercise time and failure edge cases;
-in-process loopback tests exercise the concrete HTTP/JSON, TCP-connect, TCP-exchange,
-and DNS adapters through state publication, TTL, and rendering. See
+in-process tests exercise the concrete HTTP/JSON, TCP-connect, ICMP-ping,
+TCP-exchange, and DNS adapters through state publication, TTL, and rendering. See
 [Host Monitor Engine](monitor-engine.md) for comparison and scheduling semantics.
 
 The simulator automatically registers an optional `monitors` array from its JSON
@@ -266,6 +277,8 @@ are shown in [`tcp-connect.example.json`](../examples/tcp-connect.example.json) 
 [`tcp-exchange.example.json`](../examples/tcp-exchange.example.json). Standalone
 address resolution is shown in
 [`dns-monitor.example.json`](../examples/dns-monitor.example.json).
+A local operations profile can use `icmp_ping` for endpoints that expose no
+suitable application service.
 
 The simulator supports:
 
@@ -302,7 +315,7 @@ NVS, LittleFS, GPIO, or OTA support. MI packet construction is host-tested, but
 actual BLE behavior remains a hardware validation task. WinHTTP/Schannel HTTPS,
 system certificate trust, named desktop secrets, bounded HTTP methods, request
 headers and bodies, scalar JSON extraction, TCP connect, bounded TCP text exchange,
-DNS address resolution, evaluation, concurrent interval execution, and display
+ICMP echo, DNS address resolution, evaluation, concurrent interval execution, and display
 responsiveness are implemented and host-tested. Per-monitor custom CAs, certificate
 pins, and additional pull transports remain deferred. See
 [Appliance Monitoring and TLS](appliance-monitoring.md) for the selected Win32 and

@@ -12,6 +12,7 @@
 #include "pixelstatus/host/dns_monitor_runner.hpp"
 #include "pixelstatus/host/http_display_driver.hpp"
 #include "pixelstatus/host/http_monitor_runner.hpp"
+#include "pixelstatus/host/icmp_ping_monitor_runner.hpp"
 #include "pixelstatus/host/monitor_executor.hpp"
 #include "pixelstatus/host/monitor_runner_factory.hpp"
 #include "pixelstatus/host/tcp_connect_monitor_runner.hpp"
@@ -1726,6 +1727,35 @@ void test_host_tcp_connect_monitor_runner() {
     CHECK(!pixelstatus::host::create_tcp_connect_monitor_runner(unavailable));
 }
 
+void test_host_icmp_ping_monitor_runner() {
+    pixelstatus::IcmpPingMonitorConfig config;
+    config.host = "127.0.0.1";
+    config.timeout = 1s;
+
+    auto created = pixelstatus::host::create_icmp_ping_monitor_runner(config);
+    CHECK(created);
+    auto result = created.runner->run(std::chrono::steady_clock::now());
+    CHECK(result.transport_success);
+    CHECK(result.error == pixelstatus::MonitorError::none);
+    CHECK(std::holds_alternative<std::int64_t>(result.value));
+    CHECK(std::get<std::int64_t>(result.value) >= 0);
+    CHECK(result.detail.find("ICMP echo reply") != std::string::npos);
+
+    created = pixelstatus::host::create_monitor_runner(
+        pixelstatus::MonitorSourceConfig{config});
+    CHECK(created);
+    result = created.runner->run(std::chrono::steady_clock::now());
+    CHECK(result.transport_success);
+
+    config.host = "bad host";
+    CHECK(!pixelstatus::host::create_icmp_ping_monitor_runner(config));
+    config.host = "127.0.0.1";
+    config.timeout = 0ms;
+    CHECK(!pixelstatus::host::create_icmp_ping_monitor_runner(config));
+    config.timeout = 31s;
+    CHECK(!pixelstatus::host::create_icmp_ping_monitor_runner(config));
+}
+
 void test_host_dns_monitor_runner() {
     pixelstatus::DnsMonitorConfig config;
     config.host = "localhost";
@@ -2052,6 +2082,7 @@ int main() {
     test_monitor_executor_concurrency();
     test_host_http_monitor_runner();
     test_host_tcp_connect_monitor_runner();
+    test_host_icmp_ping_monitor_runner();
     test_host_dns_monitor_runner();
     test_host_tcp_exchange_monitor_runner();
     test_http_display_driver();

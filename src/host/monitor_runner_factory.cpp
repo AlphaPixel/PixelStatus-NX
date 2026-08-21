@@ -2,6 +2,7 @@
 
 #include "pixelstatus/host/dns_monitor_runner.hpp"
 #include "pixelstatus/host/http_monitor_runner.hpp"
+#include "pixelstatus/host/icmp_ping_monitor_runner.hpp"
 #include "pixelstatus/host/tcp_connect_monitor_runner.hpp"
 #include "pixelstatus/host/tcp_exchange_monitor_runner.hpp"
 
@@ -20,6 +21,8 @@ MonitorRunnerCreationResult create_monitor_runner(
             return create_http_monitor_runner(std::move(source), secret_resolver);
         } else if constexpr (std::is_same_v<Source, TcpConnectMonitorConfig>) {
             return create_tcp_connect_monitor_runner(std::move(source));
+        } else if constexpr (std::is_same_v<Source, IcmpPingMonitorConfig>) {
+            return create_icmp_ping_monitor_runner(std::move(source));
         } else if constexpr (std::is_same_v<Source, TcpExchangeMonitorConfig>) {
             return create_tcp_exchange_monitor_runner(std::move(source));
         } else {

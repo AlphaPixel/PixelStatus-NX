@@ -109,6 +109,12 @@ HTTP, so neither the evaluator nor scheduler depends on the transport type.
 The shared deadline begins before resolution, but the operating system's blocking
 resolver call cannot itself be cancelled by the current host executor.
 
+The ICMP-ping runner resolves an IPv4 hostname or address and sends one bounded
+echo request through the Windows ICMP API. Success observes reply latency in
+integer milliseconds. Echo timeouts and unreachable replies use the same normalized
+transport failures as the other runners. The API does not require administrator
+privileges or a raw socket.
+
 The TCP-exchange runner builds on the same private socket transport. It optionally
 sends a bounded text payload, reads through a configured delimiter under a bounded
 response size, and exposes either the response text or total exchange latency. One
@@ -125,7 +131,8 @@ resolver call itself remains non-cancellable.
 
 Per-monitor custom CAs and certificate pins, cookie/session authentication, DNS
 record-type queries, binary or multi-step TCP exchanges, jitter, cron scheduling,
-and in-flight request cancellation remain deferred. The Windows host now performs
+and in-flight request cancellation remain deferred. An ESP-IDF adapter for the
+portable ICMP configuration also remains a firmware task. The Windows host now performs
 HTTPS with WinHTTP/Schannel system trust and resolves named header secrets from the
 environment or Windows Credential Manager. The selected desktop and ESP32 TLS
 paths, plus the requirements of the first target appliances, are recorded in

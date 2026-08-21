@@ -277,14 +277,19 @@ int main(int argc, char** argv) {
     pixelstatus::StateStore states;
     const auto sources = unique_sources(config);
     const std::vector<std::string> preferred_statuses{"ok", "fail", "info", "ok"};
+    const auto demo_states = config.monitors.empty();
     for (std::size_t index = 0; index < sources.size(); ++index) {
         auto state = pixelstatus::MonitorState{};
         state.id = sources[index];
-        state.status = available_status(config, preferred_statuses[index % preferred_statuses.size()]);
-        state.message = "Simulator-generated state";
+        state.status = demo_states
+            ? available_status(config, preferred_statuses[index % preferred_statuses.size()])
+            : "unknown";
+        state.message = demo_states
+            ? "Simulator-generated state"
+            : "Awaiting monitor or push update";
         state.observed_at = started_at;
         state.updated_at = started_at;
-        if (index + 1U == sources.size()) {
+        if (demo_states && index + 1U == sources.size()) {
             state.ttl = 6s;
         }
         if (!states.upsert(std::move(state))) {

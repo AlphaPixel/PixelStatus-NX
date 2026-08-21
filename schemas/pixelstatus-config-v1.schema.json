@@ -261,6 +261,7 @@
       "oneOf": [
         {"$ref": "#/$defs/httpMonitor"},
         {"$ref": "#/$defs/tcpConnectMonitor"},
+        {"$ref": "#/$defs/icmpPingMonitor"},
         {"$ref": "#/$defs/tcpExchangeMonitor"},
         {"$ref": "#/$defs/dnsMonitor"}
       ]
@@ -366,6 +367,38 @@
           "type": "integer",
           "minimum": 1,
           "maximum": 65535
+        },
+        "interval": {"$ref": "#/$defs/positiveDuration"},
+        "ttl": {"$ref": "#/$defs/positiveDuration"},
+        "timeout": {"$ref": "#/$defs/positiveDuration"},
+        "transport_failure_status": {"$ref": "#/$defs/identifier"},
+        "no_match_status": {"$ref": "#/$defs/identifier"},
+        "evaluate": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 32,
+          "items": {"$ref": "#/$defs/evaluationRule"}
+        }
+      }
+    },
+    "icmpPingMonitor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "type",
+        "host",
+        "interval",
+        "evaluate"
+      ],
+      "properties": {
+        "id": {"$ref": "#/$defs/identifier"},
+        "type": {"const": "icmp_ping"},
+        "host": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 253,
+          "pattern": "^[^\\s/?#\\[\\]]+$"
         },
         "interval": {"$ref": "#/$defs/positiveDuration"},
         "ttl": {"$ref": "#/$defs/positiveDuration"},

@@ -1081,6 +1081,42 @@ struct ParsedSteps {
     return config;
 }
 
+[[nodiscard]] std::optional<IcmpPingMonitorConfig> parse_icmp_ping_monitor(
+    const Json& monitor,
+    std::string_view path,
+    ConfigLoadResult& result) {
+    const auto host = required_string(monitor, "host", path, result);
+    const auto host_valid = host && valid_network_host(*host);
+    if (host && !host_valid) {
+        add_error(
+            result,
+            std::string(path)
+                + ".host must be a hostname or unbracketed IP address of at most 253 bytes");
+    }
+
+    IcmpPingMonitorConfig config;
+    if (host) {
+        config.host = *host;
+    }
+    if (const auto field = monitor.find("timeout"); field != monitor.end()) {
+        const auto timeout = bounded_duration_value(
+            *field,
+            std::string(path) + ".timeout",
+            Duration{1},
+            maximum_monitor_timeout,
+            result);
+        if (timeout) {
+            config.timeout = *timeout;
+        } else {
+            return std::nullopt;
+        }
+    }
+    if (!host_valid) {
+        return std::nullopt;
+    }
+    return config;
+}
+
 [[nodiscard]] std::optional<TcpExchangeMonitorConfig> parse_tcp_exchange_monitor(
     const Json& monitor,
     std::string_view path,
@@ -1300,6 +1336,15 @@ struct ParsedSteps {
             },
             path,
             result);
+    } else if (type && *type == "icmp_ping") {
+        reject_unknown_fields(
+            monitor,
+            {
+                "id", "type", "host", "interval", "ttl", "timeout",
+                "evaluate", "transport_failure_status", "no_match_status",
+            },
+            path,
+            result);
     } else if (type && *type == "tcp_exchange") {
         reject_unknown_fields(
             monitor,
@@ -1333,7 +1378,8 @@ struct ParsedSteps {
         if (type) {
             add_error(
                 result,
-                std::string(path) + ".type must be http, tcp_connect, tcp_exchange, or dns");
+                std::string(path)
+                    + ".type must be http, tcp_connect, icmp_ping, tcp_exchange, or dns");
         }
     }
     const auto interval_field = monitor.find("interval");
@@ -1365,6 +1411,10 @@ struct ParsedSteps {
     } else if (type && *type == "tcp_connect") {
         if (const auto tcp = parse_tcp_connect_monitor(monitor, path, result)) {
             source = *tcp;
+        }
+    } else if (type && *type == "icmp_ping") {
+        if (const auto ping = parse_icmp_ping_monitor(monitor, path, result)) {
+            source = *ping;
         }
     } else if (type && *type == "tcp_exchange") {
         if (const auto exchange = parse_tcp_exchange_monitor(monitor, path, result)) {

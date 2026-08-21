@@ -110,8 +110,8 @@ that point.
 
 ## Pull Monitors
 
-`monitors` is optional and currently supports `http`, `tcp_connect`, `tcp_exchange`,
-and `dns`. All use the same interval, optional TTL, timeout, transport-failure
+`monitors` is optional and currently supports `http`, `tcp_connect`, `icmp_ping`,
+`tcp_exchange`, and `dns`. All use the same interval, optional TTL, timeout, transport-failure
 status, no-match status, and ordered evaluation rules.
 
 Intervals are limited to 1 second through 24 hours, TTL to seven days, and timeout
@@ -262,6 +262,34 @@ Name-resolution failures, connection failures, and timeouts are normalized throu
 the common transport-failure status. A TCP connect check does not transmit or read
 application data. The complete runnable shape is in
 [`tcp-connect.example.json`](../examples/tcp-connect.example.json).
+
+### ICMP Ping
+
+The `icmp_ping` monitor sends one bounded IPv4 echo request and observes the reply
+round-trip time as an integer number of milliseconds. It is appropriate for a host
+that intentionally exposes no application service, but ICMP can be filtered even
+when a device is otherwise healthy.
+
+```json
+{
+  "id": "license-server",
+  "type": "icmp_ping",
+  "host": "192.0.2.10",
+  "interval": "30s",
+  "ttl": "2m",
+  "timeout": "3s",
+  "evaluate": [
+    {"when": {"value": {"less_or_equal": 150}}, "status": "ok"},
+    {"when": {"value": {"less_or_equal": 300}}, "status": "warn"},
+    {"otherwise": {"status": "fail"}}
+  ]
+}
+```
+
+Timeouts and unreachable replies use the common transport-failure status. The
+desktop runner uses the Windows ICMP API and does not require a raw-socket or
+administrator process. The configuration contract is portable; the ESP32 adapter
+will implement the same result through ESP-IDF's ping facilities.
 
 ### TCP Exchange
 

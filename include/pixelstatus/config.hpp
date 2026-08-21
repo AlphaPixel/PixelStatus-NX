@@ -107,6 +107,11 @@ struct TcpConnectMonitorConfig {
     Duration timeout{std::chrono::seconds(2)};
 };
 
+struct IcmpPingMonitorConfig {
+    std::string host;
+    Duration timeout{std::chrono::seconds(2)};
+};
+
 enum class TcpExchangeObservation {
     body,
     latency_ms,
@@ -144,6 +149,7 @@ struct DnsMonitorConfig {
 using MonitorSourceConfig = std::variant<
     HttpMonitorConfig,
     TcpConnectMonitorConfig,
+    IcmpPingMonitorConfig,
     TcpExchangeMonitorConfig,
     DnsMonitorConfig>;
 

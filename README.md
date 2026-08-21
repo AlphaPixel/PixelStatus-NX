@@ -36,6 +36,8 @@ Bounded TCP-exchange monitoring adds optional text transmission, delimiter-based
 response capture, and body or total-latency observation for simple service checks.
 Standalone DNS monitoring adds address-family filtering plus address-list, count,
 and lookup-latency observations without changing those contracts.
+Bounded ICMP echo monitoring adds a latency-valued reachability check for hosts
+that expose no suitable application service.
 The same rendered framebuffer is also available through a responsive
 [Browser Display Backend](docs/http-display.md), including a read-only frame API and
 headless host mode.
@@ -43,6 +45,9 @@ The renderer can cycle bitmap, two-line local/UTC clock, and live indicator card
 through instant, fade, or four-direction slide transitions. See
 [Card Decks](docs/card-decks.md) and the runnable
 [`card-deck.example.json`](examples/card-deck.example.json).
+Site-specific monitor inventories belong in the ignored
+`examples/operations.local.json` profile so LAN addresses, private hostnames, and
+operational notes cannot be staged accidentally.
 The implemented WinHTTP/Schannel desktop TLS path, planned ESP32 TLS path, named
 secret handling, and integration requirements for TrueNAS CORE, UniFi, Netgear
 cable modems, and Starlink are described in
@@ -2164,7 +2169,7 @@ enter through the established state, rendering, and driver contracts.
 
 Status: the portable interval scheduler, runner boundary, normalized result, generic
 evaluator, strict monitor JSON grammar, and desktop HTTP/JSON (including request
-methods, headers, and bodies), TCP-connect,
+methods, headers, and bodies), TCP-connect, ICMP-ping,
 TCP-exchange, and DNS runners are host-tested. The Win32 host also has a bounded
 multi-worker executor with per-monitor in-flight exclusion. WinHTTP/Schannel HTTPS
 and named desktop secrets are host-tested. Per-monitor custom TLS trust, ESP32

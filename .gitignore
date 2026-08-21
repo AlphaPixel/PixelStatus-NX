@@ -97,6 +97,11 @@ venv/
 !.env.example
 /secrets/
 
+# Site-specific monitoring profiles and their local validation artifacts
+/examples/operations.local.json
+/docs/operations.local.md
+/tools/test-operations.local.ps1
+
 # Operating-system metadata
 .DS_Store
 Thumbs.db
