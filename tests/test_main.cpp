@@ -392,6 +392,127 @@ void test_layout_card_renderer() {
     CHECK((*frame.pixel(6U, 9U) == pixelstatus::Rgb{1U, 2U, 3U}));
 }
 
+void test_split_layout_widget_renderer() {
+    const auto origin = pixelstatus::TimePoint{};
+    pixelstatus::AppConfig config;
+    config.display = {12U, 8U, {1U, 2U, 3U}};
+    config.statuses.emplace(
+        "ok", pixelstatus::TimelineAppearance::solid({0U, 255U, 0U}));
+    config.statuses.emplace(
+        "warn", pixelstatus::TimelineAppearance::solid({255U, 214U, 0U}));
+    config.statuses.emplace(
+        "fail", pixelstatus::TimelineAppearance::solid({255U, 23U, 68U}));
+    config.statuses.emplace(
+        "unknown", pixelstatus::TimelineAppearance::solid({98U, 0U, 234U}));
+    config.statuses.emplace(
+        "stale", pixelstatus::TimelineAppearance::solid({255U, 145U, 0U}));
+
+    pixelstatus::LayoutCardConfig layout;
+    for (const auto direction : {
+             pixelstatus::BarDirection::right,
+             pixelstatus::BarDirection::left,
+             pixelstatus::BarDirection::up,
+             pixelstatus::BarDirection::down}) {
+        pixelstatus::LayoutBarConfig bar;
+        bar.id = "bar-" + std::to_string(layout.widgets.size());
+        bar.source = bar.id;
+        bar.x = layout.widgets.size() < 2U ? 0U : 4U + layout.widgets.size() - 2U;
+        bar.y = layout.widgets.size() < 2U ? layout.widgets.size() : 0U;
+        bar.width = layout.widgets.size() < 2U ? 4U : 1U;
+        bar.height = layout.widgets.size() < 2U ? 1U : 4U;
+        bar.direction = direction;
+        bar.track_color = {0U, 0U, 32U};
+        layout.widgets.emplace_back(std::move(bar));
+    }
+
+    pixelstatus::LayoutStatusGridConfig grid;
+    grid.id = "health-grid";
+    grid.sources = {"cell-0", "cell-1", "cell-2", "cell-3", "cell-4"};
+    grid.x = 6U;
+    grid.y = 0U;
+    grid.width = 6U;
+    grid.height = 5U;
+    grid.columns = 3U;
+    grid.gap = 1U;
+    layout.widgets.emplace_back(std::move(grid));
+
+    pixelstatus::LayoutBitmapConfig bitmap;
+    bitmap.id = "bounded-bitmap";
+    bitmap.x = 0U;
+    bitmap.y = 5U;
+    bitmap.width = 2U;
+    bitmap.height = 2U;
+    bitmap.palette = {{'.', {0U, 0U, 0U}}, {'R', {255U, 0U, 0U}}};
+    bitmap.pixels = {"R.", ".R"};
+    layout.widgets.emplace_back(std::move(bitmap));
+
+    pixelstatus::LayoutBarConfig invalid;
+    invalid.id = "invalid-value";
+    invalid.source = "invalid-value";
+    invalid.x = 2U;
+    invalid.y = 5U;
+    invalid.width = 2U;
+    invalid.height = 1U;
+    invalid.track_color = {0U, 0U, 32U};
+    layout.widgets.emplace_back(std::move(invalid));
+
+    pixelstatus::CardConfig card;
+    card.id = "widgets";
+    card.hold = 1s;
+    card.content = std::move(layout);
+    config.cards.push_back(std::move(card));
+
+    pixelstatus::StateStore states;
+    const auto add_state = [&](std::string id, std::string status,
+                               pixelstatus::StateValue value) {
+        pixelstatus::MonitorState state;
+        state.id = std::move(id);
+        state.status = std::move(status);
+        state.value = std::move(value);
+        state.observed_at = origin;
+        state.updated_at = origin;
+        CHECK(states.upsert(std::move(state)));
+    };
+    for (std::size_t index = 0; index < 4U; ++index) {
+        add_state("bar-" + std::to_string(index), "ok", 50.0);
+    }
+    add_state("cell-0", "ok", {});
+    add_state("cell-1", "warn", {});
+    add_state("cell-2", "fail", {});
+    add_state("cell-3", "ok", {});
+    add_state("cell-4", "warn", {});
+    add_state("invalid-value", "ok", std::string("not numeric"));
+
+    pixelstatus::Frame frame(12U, 8U);
+    const pixelstatus::Renderer renderer(origin);
+    const auto report = renderer.render(
+        states,
+        config,
+        origin,
+        std::chrono::system_clock::time_point{},
+        frame);
+    const auto green = pixelstatus::Rgb{0U, 255U, 0U};
+    const auto track = pixelstatus::Rgb{0U, 0U, 32U};
+    CHECK(report.success);
+    CHECK(report.rendered_indicators == 10U);
+    CHECK(report.invalid_values == 1U);
+    CHECK(*frame.pixel(0U, 0U) == green && *frame.pixel(1U, 0U) == green);
+    CHECK(*frame.pixel(2U, 0U) == track && *frame.pixel(3U, 0U) == track);
+    CHECK(*frame.pixel(0U, 1U) == track && *frame.pixel(1U, 1U) == track);
+    CHECK(*frame.pixel(2U, 1U) == green && *frame.pixel(3U, 1U) == green);
+    CHECK(*frame.pixel(4U, 0U) == track && *frame.pixel(4U, 1U) == track);
+    CHECK(*frame.pixel(4U, 2U) == green && *frame.pixel(4U, 3U) == green);
+    CHECK(*frame.pixel(5U, 0U) == green && *frame.pixel(5U, 1U) == green);
+    CHECK(*frame.pixel(5U, 2U) == track && *frame.pixel(5U, 3U) == track);
+    CHECK((*frame.pixel(6U, 0U) == pixelstatus::Rgb{0U, 255U, 0U}));
+    CHECK((*frame.pixel(8U, 0U) == pixelstatus::Rgb{255U, 214U, 0U}));
+    CHECK((*frame.pixel(10U, 0U) == pixelstatus::Rgb{255U, 23U, 68U}));
+    CHECK((*frame.pixel(10U, 3U) == pixelstatus::Rgb{1U, 2U, 3U}));
+    CHECK((*frame.pixel(0U, 5U) == pixelstatus::Rgb{255U, 0U, 0U}));
+    CHECK((*frame.pixel(1U, 6U) == pixelstatus::Rgb{255U, 0U, 0U}));
+    CHECK(*frame.pixel(2U, 5U) == track && *frame.pixel(3U, 5U) == track);
+}
+
 void test_mi_protocol_vectors() {
     const auto pixel_zero = pixelstatus::mi::build_pixel_packet(0, {255, 0, 0});
     const pixelstatus::mi::PixelPacket expected_zero{
@@ -502,6 +623,107 @@ void test_layout_card_configuration() {
     CHECK(clock && clock->timezone == pixelstatus::ClockTimeZone::utc);
     CHECK(clock && clock->x == 0U && clock->y == 9U);
     CHECK(clock && clock->width == 16U && clock->height == 7U);
+}
+
+void test_split_layout_configuration() {
+    const auto path = std::filesystem::path(PIXELSTATUS_TEST_DATA_DIR)
+        / "split-layout.example.json";
+    const auto loaded = pixelstatus::load_config_file(path);
+    if (!loaded) {
+        for (const auto& error : loaded.errors) {
+            std::cerr << "split layout config error: " << error << '\n';
+        }
+    }
+    CHECK(loaded);
+    if (!loaded.config || loaded.config->cards.empty()) {
+        return;
+    }
+    const auto* layout = std::get_if<pixelstatus::LayoutCardConfig>(
+        &loaded.config->cards.front().content);
+    CHECK(layout != nullptr);
+    CHECK(layout && layout->widgets.size() == 9U);
+    if (!layout || layout->widgets.size() != 9U) {
+        return;
+    }
+    const auto* first = std::get_if<pixelstatus::LayoutBarConfig>(&layout->widgets[0]);
+    const auto* drives =
+        std::get_if<pixelstatus::LayoutStatusGridConfig>(&layout->widgets[4]);
+    const auto* primary =
+        std::get_if<pixelstatus::LayoutBarConfig>(&layout->widgets[5]);
+    const auto* secondary =
+        std::get_if<pixelstatus::LayoutBarConfig>(&layout->widgets[6]);
+    const auto* vps =
+        std::get_if<pixelstatus::LayoutStatusGridConfig>(&layout->widgets[7]);
+    const auto* clock =
+        std::get_if<pixelstatus::LayoutClockConfig>(&layout->widgets[8]);
+    CHECK(first && first->x == 0U && first->y == 0U);
+    CHECK(first && first->width == 4U && first->height == 2U);
+    CHECK(drives && drives->x == 4U && drives->y == 0U);
+    CHECK(drives && drives->width == 4U && drives->height == 8U);
+    CHECK(primary && primary->x == 8U && primary->width == 2U);
+    CHECK(secondary && secondary->x == 10U && secondary->width == 2U);
+    CHECK(vps && vps->x == 12U && vps->width == 4U);
+    CHECK(clock && clock->x == 0U && clock->y == 9U);
+    CHECK(clock && clock->width == 16U && clock->height == 7U);
+}
+
+void test_split_layout_rounding_and_bitmap_configuration() {
+    const auto path = std::filesystem::temp_directory_path()
+        / "pixelstatus-nx-split-rounding-test.json";
+    {
+        std::ofstream output(path, std::ios::binary | std::ios::trunc);
+        output << R"({
+            "schema_version": 1,
+            "display": {"width": 11, "height": 2},
+            "statuses": {
+                "unknown": {"appearance": {"solid": "#000000"}},
+                "stale": {"appearance": {"solid": "#000000"}}
+            },
+            "cards": [
+                {
+                    "id": "rounding",
+                    "type": "layout",
+                    "hold": "1s",
+                    "root": {
+                        "type": "row",
+                        "gap": 1,
+                        "children": [
+                            {
+                                "id": "bitmap",
+                                "type": "bitmap",
+                                "size": 2,
+                                "palette": {".": "#000000", "X": "#FFFFFF"},
+                                "pixels": ["X.", ".X"]
+                            },
+                            {"id": "one", "type": "indicator", "source": "one", "weight": 1},
+                            {"id": "two", "type": "indicator", "source": "two", "weight": 2}
+                        ]
+                    }
+                }
+            ]
+        })";
+    }
+
+    const auto loaded = pixelstatus::load_config_file(path);
+    std::error_code ignored;
+    std::filesystem::remove(path, ignored);
+    CHECK(loaded);
+    if (!loaded.config || loaded.config->cards.empty()) {
+        return;
+    }
+    const auto* layout = std::get_if<pixelstatus::LayoutCardConfig>(
+        &loaded.config->cards.front().content);
+    CHECK(layout && layout->widgets.size() == 3U);
+    if (!layout || layout->widgets.size() != 3U) {
+        return;
+    }
+    const auto* bitmap =
+        std::get_if<pixelstatus::LayoutBitmapConfig>(&layout->widgets[0]);
+    const auto* one = std::get_if<pixelstatus::IndicatorConfig>(&layout->widgets[1]);
+    const auto* two = std::get_if<pixelstatus::IndicatorConfig>(&layout->widgets[2]);
+    CHECK(bitmap && bitmap->x == 0U && bitmap->width == 2U && bitmap->height == 2U);
+    CHECK(one && one->x == 3U && one->width == 2U);
+    CHECK(two && two->x == 6U && two->width == 5U);
 }
 
 void test_http_monitor_configuration() {
@@ -1404,6 +1626,76 @@ void test_configuration_rejects_invalid_layout_card() {
     CHECK(errors_contain("duplicates an earlier widget"));
 }
 
+void test_configuration_rejects_invalid_split_layout() {
+    const auto path = std::filesystem::temp_directory_path()
+        / "pixelstatus-nx-invalid-split-layout-test.json";
+    {
+        std::ofstream output(path, std::ios::binary | std::ios::trunc);
+        output << R"({
+            "schema_version": 1,
+            "display": {"width": 4, "height": 4},
+            "statuses": {
+                "unknown": {"appearance": {"solid": "#000000"}},
+                "stale": {"appearance": {"solid": "#000000"}}
+            },
+            "cards": [
+                {
+                    "id": "overflow",
+                    "type": "layout",
+                    "hold": "1s",
+                    "root": {
+                        "type": "row",
+                        "gap": 2,
+                        "children": [
+                            {"id": "a", "type": "indicator", "source": "a"},
+                            {"id": "b", "type": "indicator", "source": "b"},
+                            {"id": "c", "type": "indicator", "source": "c"}
+                        ]
+                    }
+                },
+                {
+                    "id": "bad-bar",
+                    "type": "layout",
+                    "hold": "1s",
+                    "root": {
+                        "id": "bar",
+                        "type": "bar",
+                        "source": "bar",
+                        "minimum": 100,
+                        "maximum": 0
+                    }
+                },
+                {
+                    "id": "bad-grid",
+                    "type": "layout",
+                    "hold": "1s",
+                    "root": {
+                        "id": "grid",
+                        "type": "status_grid",
+                        "columns": 3,
+                        "gap": 1,
+                        "sources": ["a", "b", "c", "d", "e", "f", "g", "h", "i"]
+                    }
+                }
+            ]
+        })";
+    }
+
+    const auto loaded = pixelstatus::load_config_file(path);
+    std::error_code ignored;
+    std::filesystem::remove(path, ignored);
+    CHECK(!loaded);
+    const auto errors_contain = [&loaded](std::string_view text) {
+        return std::any_of(
+            loaded.errors.begin(), loaded.errors.end(), [text](const auto& error) {
+                return error.find(text) != std::string::npos;
+            });
+    };
+    CHECK(errors_contain("at least one pixel"));
+    CHECK(errors_contain("maximum must be greater"));
+    CHECK(errors_contain("cannot fit its grid"));
+}
+
 #ifdef PIXELSTATUS_TEST_HOST_HTTP
 
 struct BlockingRunnerProbe {
@@ -2221,10 +2513,13 @@ int main() {
     test_card_deck_slide_directions();
     test_clock_card_renderer();
     test_layout_card_renderer();
+    test_split_layout_widget_renderer();
     test_mi_protocol_vectors();
     test_sample_configuration();
     test_card_deck_configuration();
     test_layout_card_configuration();
+    test_split_layout_configuration();
+    test_split_layout_rounding_and_bitmap_configuration();
     test_http_monitor_configuration();
     test_http_request_configuration();
     test_tcp_connect_monitor_configuration();
@@ -2233,6 +2528,7 @@ int main() {
     test_configuration_rejects_unknown_fields();
     test_configuration_rejects_invalid_card_deck();
     test_configuration_rejects_invalid_layout_card();
+    test_configuration_rejects_invalid_split_layout();
     test_configuration_rejects_invalid_identifiers();
     test_configuration_rejects_invalid_monitor();
     test_configuration_rejects_invalid_tcp_monitor();

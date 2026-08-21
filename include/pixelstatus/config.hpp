@@ -73,7 +73,53 @@ struct LayoutClockConfig {
     Rgb color{0x00, 0xB0, 0xFF};
 };
 
-using LayoutWidgetConfig = std::variant<IndicatorConfig, LayoutClockConfig>;
+enum class BarDirection {
+    right,
+    left,
+    up,
+    down,
+};
+
+struct LayoutBarConfig {
+    std::string id;
+    std::string source;
+    std::size_t x{};
+    std::size_t y{};
+    std::size_t width{1};
+    std::size_t height{1};
+    BarDirection direction{BarDirection::right};
+    double minimum{};
+    double maximum{100.0};
+    Rgb track_color{};
+};
+
+struct LayoutStatusGridConfig {
+    std::string id;
+    std::vector<std::string> sources;
+    std::size_t x{};
+    std::size_t y{};
+    std::size_t width{1};
+    std::size_t height{1};
+    std::size_t columns{1};
+    std::size_t gap{};
+};
+
+struct LayoutBitmapConfig {
+    std::string id;
+    std::size_t x{};
+    std::size_t y{};
+    std::size_t width{1};
+    std::size_t height{1};
+    std::unordered_map<char, Rgb> palette;
+    std::vector<std::string> pixels;
+};
+
+using LayoutWidgetConfig = std::variant<
+    IndicatorConfig,
+    LayoutClockConfig,
+    LayoutBarConfig,
+    LayoutStatusGridConfig,
+    LayoutBitmapConfig>;
 
 struct LayoutCardConfig {
     std::vector<LayoutWidgetConfig> widgets;

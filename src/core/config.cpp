@@ -23,6 +23,9 @@ constexpr std::size_t maximum_dimension = 256U;
 constexpr std::size_t maximum_pixels = 65'536U;
 constexpr std::size_t maximum_indicators = 1'024U;
 constexpr std::size_t maximum_layout_widgets = 1'024U;
+constexpr std::size_t maximum_layout_nodes = 2'048U;
+constexpr std::size_t maximum_layout_depth = 16U;
+constexpr std::size_t maximum_layout_weight = 1'000'000U;
 constexpr std::size_t maximum_cards = 32U;
 constexpr std::size_t maximum_bitmap_palette_entries = 32U;
 constexpr std::size_t maximum_statuses = 256U;
@@ -1443,25 +1446,16 @@ struct ParsedSteps {
     const Json& item,
     std::string_view path,
     const DisplayConfig& display,
-    ConfigLoadResult& result,
-    bool allow_type = false) {
+    ConfigLoadResult& result) {
     if (!item.is_object()) {
         add_error(result, std::string(path) + " must be an object");
         return std::nullopt;
     }
-    if (allow_type) {
-        reject_unknown_fields(
-            item,
-            {"id", "type", "source", "x", "y", "width", "height"},
-            path,
-            result);
-    } else {
-        reject_unknown_fields(
-            item,
-            {"id", "source", "x", "y", "width", "height"},
-            path,
-            result);
-    }
+    reject_unknown_fields(
+        item,
+        {"id", "source", "x", "y", "width", "height"},
+        path,
+        result);
 
     const auto id = required_identifier(item, "id", path, result);
     const auto source = required_identifier(item, "source", path, result);
@@ -1480,23 +1474,27 @@ struct ParsedSteps {
     return IndicatorConfig{*id, *source, *x, *y, *width, *height};
 }
 
-[[nodiscard]] std::optional<LayoutClockConfig> parse_layout_clock_config(
+struct LayoutBounds {
+    std::size_t x{};
+    std::size_t y{};
+    std::size_t width{};
+    std::size_t height{};
+};
+
+[[nodiscard]] std::optional<LayoutBounds> parse_layout_bounds(
     const Json& item,
     std::string_view path,
     const DisplayConfig& display,
-    ConfigLoadResult& result) {
-    reject_unknown_fields(
-        item,
-        {"id", "type", "x", "y", "width", "height", "timezone", "color"},
-        path,
-        result);
-    const auto id = required_identifier(item, "id", path, result);
+    ConfigLoadResult& result,
+    const std::optional<LayoutBounds>& assigned) {
+    if (assigned) {
+        return assigned;
+    }
     const auto x = bounded_size(item, "x", path, 0, maximum_dimension, result);
     const auto y = bounded_size(item, "y", path, 0, maximum_dimension, result);
     const auto width = bounded_size(item, "width", path, 1, maximum_dimension, result);
     const auto height = bounded_size(item, "height", path, 1, maximum_dimension, result);
-    const auto timezone = required_string(item, "timezone", path, result);
-    if (!id || !x || !y || !width || !height || !timezone) {
+    if (!x || !y || !width || !height) {
         return std::nullopt;
     }
     if (*x >= display.width || *width > display.width - *x
@@ -1504,17 +1502,78 @@ struct ParsedSteps {
         add_error(result, std::string(path) + " extends outside the configured display");
         return std::nullopt;
     }
-    if (*width < 15U || *height < 7U) {
+    return LayoutBounds{*x, *y, *width, *height};
+}
+
+[[nodiscard]] std::optional<double> optional_finite_number(
+    const Json& item,
+    std::string_view key,
+    double default_value,
+    std::string_view path,
+    ConfigLoadResult& result) {
+    const auto field = item.find(key);
+    if (field == item.end()) {
+        return default_value;
+    }
+    if (!field->is_number()) {
+        add_error(result, std::string(path) + "." + std::string(key) + " must be a number");
+        return std::nullopt;
+    }
+    const auto value = field->get<double>();
+    if (!std::isfinite(value)) {
+        add_error(result, std::string(path) + "." + std::string(key) + " must be finite");
+        return std::nullopt;
+    }
+    return value;
+}
+
+[[nodiscard]] bool layout_bounds_are_valid(
+    const LayoutBounds& bounds,
+    std::string_view path,
+    ConfigLoadResult& result) {
+    if (bounds.width == 0U || bounds.height == 0U) {
+        add_error(result, std::string(path) + " resolved to a zero-sized rectangle");
+        return false;
+    }
+    return true;
+}
+
+[[nodiscard]] std::optional<LayoutClockConfig> parse_layout_clock_config(
+    const Json& item,
+    std::string_view path,
+    const DisplayConfig& display,
+    ConfigLoadResult& result,
+    const std::optional<LayoutBounds>& assigned = std::nullopt) {
+    if (assigned) {
+        reject_unknown_fields(
+            item,
+            {"id", "type", "timezone", "color", "size", "weight"},
+            path,
+            result);
+    } else {
+        reject_unknown_fields(
+            item,
+            {"id", "type", "x", "y", "width", "height", "timezone", "color"},
+            path,
+            result);
+    }
+    const auto id = required_identifier(item, "id", path, result);
+    const auto bounds = parse_layout_bounds(item, path, display, result, assigned);
+    const auto timezone = required_string(item, "timezone", path, result);
+    if (!id || !bounds || !timezone || !layout_bounds_are_valid(*bounds, path, result)) {
+        return std::nullopt;
+    }
+    if (bounds->width < 15U || bounds->height < 7U) {
         add_error(result, std::string(path) + " requires bounds of at least 15x7 pixels");
         return std::nullopt;
     }
 
     LayoutClockConfig clock;
     clock.id = *id;
-    clock.x = *x;
-    clock.y = *y;
-    clock.width = *width;
-    clock.height = *height;
+    clock.x = bounds->x;
+    clock.y = bounds->y;
+    clock.width = bounds->width;
+    clock.height = bounds->height;
     if (*timezone == "local") {
         clock.timezone = ClockTimeZone::local;
         clock.color = {0x00, 0xB0, 0xFF};
@@ -1535,11 +1594,279 @@ struct ParsedSteps {
     return clock;
 }
 
+[[nodiscard]] std::optional<IndicatorConfig> parse_layout_indicator_config(
+    const Json& item,
+    std::string_view path,
+    const DisplayConfig& display,
+    ConfigLoadResult& result,
+    const std::optional<LayoutBounds>& assigned) {
+    if (assigned) {
+        reject_unknown_fields(
+            item,
+            {"id", "type", "source", "size", "weight"},
+            path,
+            result);
+    } else {
+        reject_unknown_fields(
+            item,
+            {"id", "type", "source", "x", "y", "width", "height"},
+            path,
+            result);
+    }
+    const auto id = required_identifier(item, "id", path, result);
+    const auto source = required_identifier(item, "source", path, result);
+    const auto bounds = parse_layout_bounds(item, path, display, result, assigned);
+    if (!id || !source || !bounds || !layout_bounds_are_valid(*bounds, path, result)) {
+        return std::nullopt;
+    }
+    return IndicatorConfig{
+        *id, *source, bounds->x, bounds->y, bounds->width, bounds->height};
+}
+
+[[nodiscard]] std::optional<LayoutBarConfig> parse_layout_bar_config(
+    const Json& item,
+    std::string_view path,
+    const DisplayConfig& display,
+    ConfigLoadResult& result,
+    const std::optional<LayoutBounds>& assigned) {
+    if (assigned) {
+        reject_unknown_fields(
+            item,
+            {"id", "type", "source", "direction", "minimum", "maximum",
+             "track_color", "size", "weight"},
+            path,
+            result);
+    } else {
+        reject_unknown_fields(
+            item,
+            {"id", "type", "source", "x", "y", "width", "height", "direction",
+             "minimum", "maximum", "track_color"},
+            path,
+            result);
+    }
+    const auto id = required_identifier(item, "id", path, result);
+    const auto source = required_identifier(item, "source", path, result);
+    const auto bounds = parse_layout_bounds(item, path, display, result, assigned);
+    const auto minimum = optional_finite_number(item, "minimum", 0.0, path, result);
+    const auto maximum = optional_finite_number(item, "maximum", 100.0, path, result);
+    if (!id || !source || !bounds || !minimum || !maximum
+        || !layout_bounds_are_valid(*bounds, path, result)) {
+        return std::nullopt;
+    }
+    if (*maximum <= *minimum) {
+        add_error(result, std::string(path) + ".maximum must be greater than .minimum");
+        return std::nullopt;
+    }
+
+    LayoutBarConfig bar;
+    bar.id = *id;
+    bar.source = *source;
+    bar.x = bounds->x;
+    bar.y = bounds->y;
+    bar.width = bounds->width;
+    bar.height = bounds->height;
+    bar.minimum = *minimum;
+    bar.maximum = *maximum;
+    bar.track_color = display.background;
+    if (const auto field = item.find("direction"); field != item.end()) {
+        if (!field->is_string()) {
+            add_error(result, std::string(path) + ".direction must be a string");
+            return std::nullopt;
+        }
+        const auto& direction = field->get_ref<const std::string&>();
+        if (direction == "right") {
+            bar.direction = BarDirection::right;
+        } else if (direction == "left") {
+            bar.direction = BarDirection::left;
+        } else if (direction == "up") {
+            bar.direction = BarDirection::up;
+        } else if (direction == "down") {
+            bar.direction = BarDirection::down;
+        } else {
+            add_error(result, std::string(path) + ".direction must be right, left, up, or down");
+            return std::nullopt;
+        }
+    }
+    if (const auto field = item.find("track_color"); field != item.end()) {
+        const auto color = color_value(*field, std::string(path) + ".track_color", result);
+        if (!color) {
+            return std::nullopt;
+        }
+        bar.track_color = *color;
+    }
+    return bar;
+}
+
+[[nodiscard]] std::optional<LayoutStatusGridConfig> parse_layout_status_grid_config(
+    const Json& item,
+    std::string_view path,
+    const DisplayConfig& display,
+    ConfigLoadResult& result,
+    const std::optional<LayoutBounds>& assigned) {
+    if (assigned) {
+        reject_unknown_fields(
+            item,
+            {"id", "type", "sources", "columns", "gap", "size", "weight"},
+            path,
+            result);
+    } else {
+        reject_unknown_fields(
+            item,
+            {"id", "type", "sources", "columns", "gap", "x", "y", "width", "height"},
+            path,
+            result);
+    }
+    const auto id = required_identifier(item, "id", path, result);
+    const auto bounds = parse_layout_bounds(item, path, display, result, assigned);
+    const auto sources_field = item.find("sources");
+    if (sources_field == item.end() || !sources_field->is_array()
+        || sources_field->empty() || sources_field->size() > maximum_layout_widgets) {
+        add_error(result, std::string(path) + ".sources must contain between 1 and 1024 identifiers");
+        return std::nullopt;
+    }
+    const auto columns = bounded_size(
+        item, "columns", path, 1, sources_field->size(), result);
+    std::size_t gap{};
+    if (item.contains("gap")) {
+        const auto parsed = bounded_size(item, "gap", path, 0, maximum_dimension, result);
+        if (!parsed) {
+            return std::nullopt;
+        }
+        gap = *parsed;
+    }
+    if (!id || !bounds || !columns || !layout_bounds_are_valid(*bounds, path, result)) {
+        return std::nullopt;
+    }
+
+    LayoutStatusGridConfig grid;
+    grid.id = *id;
+    grid.x = bounds->x;
+    grid.y = bounds->y;
+    grid.width = bounds->width;
+    grid.height = bounds->height;
+    grid.columns = *columns;
+    grid.gap = gap;
+    std::unordered_set<std::string> sources;
+    bool valid = true;
+    for (std::size_t index = 0; index < sources_field->size(); ++index) {
+        const auto source_path = std::string(path) + ".sources[" + std::to_string(index) + "]";
+        if (!(*sources_field)[index].is_string()
+            || !is_valid_identifier((*sources_field)[index].get_ref<const std::string&>())) {
+            add_error(result, source_path + " must be a valid identifier");
+            valid = false;
+            continue;
+        }
+        auto source = (*sources_field)[index].get<std::string>();
+        if (!sources.insert(source).second) {
+            add_error(result, source_path + " duplicates an earlier grid source");
+            valid = false;
+            continue;
+        }
+        grid.sources.push_back(std::move(source));
+    }
+    const auto rows = (sources_field->size() + *columns - 1U) / *columns;
+    const auto horizontal_gaps = gap * (*columns - 1U);
+    const auto vertical_gaps = gap * (rows - 1U);
+    if (horizontal_gaps > bounds->width || bounds->width - horizontal_gaps < *columns
+        || vertical_gaps > bounds->height || bounds->height - vertical_gaps < rows) {
+        add_error(result, std::string(path) + " bounds cannot fit its grid cells and gaps");
+        valid = false;
+    }
+    if (!valid) {
+        return std::nullopt;
+    }
+    return grid;
+}
+
+[[nodiscard]] std::optional<LayoutBitmapConfig> parse_layout_bitmap_config(
+    const Json& item,
+    std::string_view path,
+    const DisplayConfig& display,
+    ConfigLoadResult& result,
+    const std::optional<LayoutBounds>& assigned) {
+    if (assigned) {
+        reject_unknown_fields(
+            item,
+            {"id", "type", "palette", "pixels", "size", "weight"},
+            path,
+            result);
+    } else {
+        reject_unknown_fields(
+            item,
+            {"id", "type", "palette", "pixels", "x", "y", "width", "height"},
+            path,
+            result);
+    }
+    const auto id = required_identifier(item, "id", path, result);
+    const auto bounds = parse_layout_bounds(item, path, display, result, assigned);
+    const auto palette = item.find("palette");
+    const auto pixels = item.find("pixels");
+    if (!id || !bounds || !layout_bounds_are_valid(*bounds, path, result)) {
+        return std::nullopt;
+    }
+    if (palette == item.end() || !palette->is_object() || palette->empty()
+        || palette->size() > maximum_bitmap_palette_entries) {
+        add_error(result, std::string(path) + ".palette must contain between 1 and 32 entries");
+        return std::nullopt;
+    }
+    LayoutBitmapConfig bitmap;
+    bitmap.id = *id;
+    bitmap.x = bounds->x;
+    bitmap.y = bounds->y;
+    bitmap.width = bounds->width;
+    bitmap.height = bounds->height;
+    bool valid = true;
+    for (auto entry = palette->begin(); entry != palette->end(); ++entry) {
+        if (entry.key().size() != 1U
+            || static_cast<unsigned char>(entry.key().front()) < 0x20U
+            || static_cast<unsigned char>(entry.key().front()) > 0x7EU) {
+            add_error(result, std::string(path) + ".palette keys must be one printable ASCII character");
+            valid = false;
+            continue;
+        }
+        const auto color = color_value(
+            entry.value(), std::string(path) + ".palette." + entry.key(), result);
+        if (color) {
+            bitmap.palette.emplace(entry.key().front(), *color);
+        } else {
+            valid = false;
+        }
+    }
+    if (pixels == item.end() || !pixels->is_array() || pixels->size() != bounds->height) {
+        add_error(result, std::string(path) + ".pixels must match the resolved widget height");
+        return std::nullopt;
+    }
+    for (std::size_t row = 0; row < pixels->size(); ++row) {
+        const auto row_path = std::string(path) + ".pixels[" + std::to_string(row) + "]";
+        if (!(*pixels)[row].is_string()) {
+            add_error(result, row_path + " must be a string");
+            valid = false;
+            continue;
+        }
+        const auto value = (*pixels)[row].get<std::string>();
+        if (value.size() != bounds->width) {
+            add_error(result, row_path + " must match the resolved widget width");
+            valid = false;
+        } else if (std::any_of(value.begin(), value.end(), [&bitmap](char character) {
+                       return !bitmap.palette.contains(character);
+                   })) {
+            add_error(result, row_path + " uses a character missing from palette");
+            valid = false;
+        }
+        bitmap.pixels.push_back(value);
+    }
+    if (!valid) {
+        return std::nullopt;
+    }
+    return bitmap;
+}
+
 [[nodiscard]] std::optional<LayoutWidgetConfig> parse_layout_widget(
     const Json& item,
     std::string_view path,
     const DisplayConfig& display,
-    ConfigLoadResult& result) {
+    ConfigLoadResult& result,
+    const std::optional<LayoutBounds>& assigned = std::nullopt) {
     if (!item.is_object()) {
         add_error(result, std::string(path) + " must be an object");
         return std::nullopt;
@@ -1549,24 +1876,234 @@ struct ParsedSteps {
         return std::nullopt;
     }
     if (*type == "indicator") {
-        if (auto indicator = parse_indicator_config(item, path, display, result, true)) {
+        if (auto indicator = parse_layout_indicator_config(
+                item, path, display, result, assigned)) {
             return LayoutWidgetConfig{std::move(*indicator)};
         }
         return std::nullopt;
     }
     if (*type == "clock") {
-        if (auto clock = parse_layout_clock_config(item, path, display, result)) {
+        if (auto clock = parse_layout_clock_config(item, path, display, result, assigned)) {
             return LayoutWidgetConfig{std::move(*clock)};
+        }
+        return std::nullopt;
+    }
+    if (*type == "bar") {
+        if (auto bar = parse_layout_bar_config(item, path, display, result, assigned)) {
+            return LayoutWidgetConfig{std::move(*bar)};
+        }
+        return std::nullopt;
+    }
+    if (*type == "status_grid") {
+        if (auto grid = parse_layout_status_grid_config(
+                item, path, display, result, assigned)) {
+            return LayoutWidgetConfig{std::move(*grid)};
+        }
+        return std::nullopt;
+    }
+    if (*type == "bitmap") {
+        if (auto bitmap = parse_layout_bitmap_config(item, path, display, result, assigned)) {
+            return LayoutWidgetConfig{std::move(*bitmap)};
         }
         return std::nullopt;
     }
     reject_unknown_fields(
         item,
-        {"id", "type", "source", "x", "y", "width", "height", "timezone", "color"},
+        {"id", "type", "source", "sources", "x", "y", "width", "height",
+         "timezone", "color", "direction", "minimum", "maximum", "track_color",
+         "columns", "gap", "palette", "pixels", "size", "weight"},
         path,
         result);
-    add_error(result, std::string(path) + ".type must be indicator or clock");
+    add_error(
+        result,
+        std::string(path)
+            + ".type must be indicator, clock, bar, status_grid, or bitmap");
     return std::nullopt;
+}
+
+struct LayoutParseState {
+    std::size_t nodes{};
+    std::unordered_set<std::string> ids;
+};
+
+[[nodiscard]] bool parse_layout_node(
+    const Json& item,
+    std::string_view path,
+    const DisplayConfig& display,
+    const LayoutBounds& bounds,
+    std::size_t depth,
+    LayoutParseState& state,
+    LayoutCardConfig& content,
+    ConfigLoadResult& result) {
+    if (!item.is_object()) {
+        add_error(result, std::string(path) + " must be an object");
+        return false;
+    }
+    ++state.nodes;
+    if (state.nodes > maximum_layout_nodes) {
+        add_error(result, std::string(path) + " exceeds the layout limit of 2048 nodes");
+        return false;
+    }
+    if (depth > maximum_layout_depth) {
+        add_error(result, std::string(path) + " exceeds the layout nesting limit of 16");
+        return false;
+    }
+    const auto type = required_string(item, "type", path, result);
+    if (!type) {
+        return false;
+    }
+    if (*type != "row" && *type != "column") {
+        auto widget = parse_layout_widget(item, path, display, result, bounds);
+        if (!widget) {
+            return false;
+        }
+        const auto& widget_id = std::visit(
+            [](const auto& value) -> const std::string& { return value.id; }, *widget);
+        if (!state.ids.insert(widget_id).second) {
+            add_error(result, std::string(path) + ".id duplicates an earlier widget on this card");
+            return false;
+        }
+        content.widgets.push_back(std::move(*widget));
+        return true;
+    }
+
+    reject_unknown_fields(
+        item, {"type", "gap", "children", "size", "weight"}, path, result);
+    const auto children = item.find("children");
+    if (children == item.end() || !children->is_array() || children->empty()
+        || children->size() > maximum_layout_widgets) {
+        add_error(result, std::string(path) + ".children must contain between 1 and 1024 nodes");
+        return false;
+    }
+    std::size_t gap{};
+    if (item.contains("gap")) {
+        const auto parsed = bounded_size(item, "gap", path, 0, maximum_dimension, result);
+        if (!parsed) {
+            return false;
+        }
+        gap = *parsed;
+    }
+    const auto extent = *type == "row" ? bounds.width : bounds.height;
+    const auto total_gaps = gap * (children->size() - 1U);
+    if (total_gaps > extent) {
+        add_error(result, std::string(path) + " gaps exceed the available split extent");
+        return false;
+    }
+
+    struct Allocation {
+        bool fixed{};
+        std::size_t value{};
+        std::size_t resolved{};
+    };
+    std::vector<Allocation> allocations;
+    allocations.reserve(children->size());
+    std::size_t fixed_total{};
+    std::size_t weighted_count{};
+    std::uint64_t total_weight{};
+    bool valid = true;
+    for (std::size_t index = 0; index < children->size(); ++index) {
+        const auto& child = (*children)[index];
+        const auto child_path = std::string(path) + ".children[" + std::to_string(index) + "]";
+        if (!child.is_object()) {
+            add_error(result, child_path + " must be an object");
+            allocations.push_back({});
+            valid = false;
+            continue;
+        }
+        const bool has_size = child.contains("size");
+        const bool has_weight = child.contains("weight");
+        if (has_size && has_weight) {
+            add_error(result, child_path + " cannot specify both size and weight");
+            allocations.push_back({});
+            valid = false;
+            continue;
+        }
+        if (has_size) {
+            const auto value = bounded_size(
+                child, "size", child_path, 1, maximum_dimension, result);
+            if (!value) {
+                allocations.push_back({});
+                valid = false;
+                continue;
+            }
+            fixed_total += *value;
+            allocations.push_back({true, *value, *value});
+        } else {
+            std::size_t weight = 1U;
+            if (has_weight) {
+                const auto value = bounded_size(
+                    child, "weight", child_path, 1, maximum_layout_weight, result);
+                if (!value) {
+                    allocations.push_back({});
+                    valid = false;
+                    continue;
+                }
+                weight = *value;
+            }
+            ++weighted_count;
+            total_weight += weight;
+            allocations.push_back({false, weight, 0U});
+        }
+    }
+    if (!valid) {
+        return false;
+    }
+    if (fixed_total + total_gaps > extent) {
+        add_error(result, std::string(path) + " fixed sizes and gaps exceed the available split extent");
+        return false;
+    }
+    const auto weighted_extent = extent - fixed_total - total_gaps;
+    if (weighted_count == 0U && weighted_extent != 0U) {
+        add_error(result, std::string(path) + " fixed children and gaps must consume the split extent");
+        return false;
+    }
+    if (weighted_count > 0U && weighted_extent < weighted_count) {
+        add_error(result, std::string(path) + " cannot allocate at least one pixel to each weighted child");
+        return false;
+    }
+    std::uint64_t cumulative_weight{};
+    std::size_t previous_extent{};
+    for (auto& allocation : allocations) {
+        if (allocation.fixed) {
+            continue;
+        }
+        cumulative_weight += allocation.value;
+        const auto next_extent = static_cast<std::size_t>(
+            static_cast<std::uint64_t>(weighted_extent) * cumulative_weight
+            / total_weight);
+        allocation.resolved = next_extent - previous_extent;
+        previous_extent = next_extent;
+        if (allocation.resolved == 0U) {
+            add_error(result, std::string(path) + " weight rounding produced a zero-sized child");
+            return false;
+        }
+    }
+
+    std::size_t cursor = *type == "row" ? bounds.x : bounds.y;
+    for (std::size_t index = 0; index < children->size(); ++index) {
+        auto child_bounds = bounds;
+        if (*type == "row") {
+            child_bounds.x = cursor;
+            child_bounds.width = allocations[index].resolved;
+        } else {
+            child_bounds.y = cursor;
+            child_bounds.height = allocations[index].resolved;
+        }
+        const auto child_path = std::string(path) + ".children[" + std::to_string(index) + "]";
+        if (!parse_layout_node(
+                (*children)[index],
+                child_path,
+                display,
+                child_bounds,
+                depth + 1U,
+                state,
+                content,
+                result)) {
+            valid = false;
+        }
+        cursor += allocations[index].resolved + gap;
+    }
+    return valid;
 }
 
 [[nodiscard]] std::optional<CardTransitionConfig> parse_card_transition(
@@ -1820,41 +2357,79 @@ struct ParsedSteps {
     if (*type == "layout") {
         reject_unknown_fields(
             item,
-            {"id", "type", "hold", "transition", "widgets"},
+            {"id", "type", "hold", "transition", "widgets", "root"},
             path,
             result);
         const auto widgets = item.find("widgets");
-        if (widgets == item.end() || !widgets->is_array()
-            || widgets->empty() || widgets->size() > maximum_layout_widgets) {
+        const auto root = item.find("root");
+        if ((widgets == item.end()) == (root == item.end())) {
             add_error(
                 result,
-                std::string(path)
-                    + ".widgets must contain between 1 and 1024 entries");
+                std::string(path) + " must contain exactly one of widgets or root");
             return std::nullopt;
         }
         LayoutCardConfig content;
-        std::unordered_set<std::string> ids;
-        for (std::size_t index = 0; index < widgets->size(); ++index) {
-            const auto widget_path = std::string(path) + ".widgets["
-                + std::to_string(index) + "]";
-            auto widget = parse_layout_widget(
-                (*widgets)[index], widget_path, display, result);
-            if (!widget) {
-                continue;
-            }
-            const auto& widget_id = std::visit(
-                [](const auto& value) -> const std::string& { return value.id; },
-                *widget);
-            if (!ids.insert(widget_id).second) {
+        if (widgets != item.end()) {
+            if (!widgets->is_array() || widgets->empty()
+                || widgets->size() > maximum_layout_widgets) {
                 add_error(
                     result,
-                    widget_path + ".id duplicates an earlier widget on this card");
-                continue;
+                    std::string(path)
+                        + ".widgets must contain between 1 and 1024 entries");
+                return std::nullopt;
             }
-            content.widgets.push_back(std::move(*widget));
-        }
-        if (content.widgets.size() != widgets->size()) {
-            return std::nullopt;
+            std::unordered_set<std::string> ids;
+            for (std::size_t index = 0; index < widgets->size(); ++index) {
+                const auto widget_path = std::string(path) + ".widgets["
+                    + std::to_string(index) + "]";
+                auto widget = parse_layout_widget(
+                    (*widgets)[index], widget_path, display, result);
+                if (!widget) {
+                    continue;
+                }
+                const auto& widget_id = std::visit(
+                    [](const auto& value) -> const std::string& { return value.id; },
+                    *widget);
+                if (!ids.insert(widget_id).second) {
+                    add_error(
+                        result,
+                        widget_path + ".id duplicates an earlier widget on this card");
+                    continue;
+                }
+                content.widgets.push_back(std::move(*widget));
+            }
+            if (content.widgets.size() != widgets->size()) {
+                return std::nullopt;
+            }
+        } else {
+            if (!root->is_object()) {
+                add_error(result, std::string(path) + ".root must be an object");
+                return std::nullopt;
+            }
+            if (root->contains("size") || root->contains("weight")) {
+                add_error(
+                    result,
+                    std::string(path) + ".root cannot specify size or weight");
+                return std::nullopt;
+            }
+            LayoutParseState state;
+            if (!parse_layout_node(
+                    *root,
+                    std::string(path) + ".root",
+                    display,
+                    LayoutBounds{0U, 0U, display.width, display.height},
+                    0U,
+                    state,
+                    content,
+                    result)) {
+                return std::nullopt;
+            }
+            if (content.widgets.empty() || content.widgets.size() > maximum_layout_widgets) {
+                add_error(
+                    result,
+                    std::string(path) + ".root must resolve to between 1 and 1024 widgets");
+                return std::nullopt;
+            }
         }
         card.content = std::move(content);
         return card;
@@ -1864,7 +2439,7 @@ struct ParsedSteps {
         item,
         {
             "id", "type", "hold", "transition", "palette", "pixels",
-            "local_color", "utc_color", "indicators", "widgets",
+            "local_color", "utc_color", "indicators", "widgets", "root",
         },
         path,
         result);

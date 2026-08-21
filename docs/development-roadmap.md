@@ -9,7 +9,7 @@ time and exclude delays obtaining credentials, network access, or physical hardw
 | --- | ---: | --- | --- |
 | 0. Host monitoring foundation | Complete | Portable state/rendering core; Win32 and browser outputs; HTTP(S), TCP, DNS, and ICMP host monitors | Public tests and the ignored local operations deck pass |
 | 1. Explicit-AABB composite cards | 2–3 days | Additive `layout` card containing bounded indicator and one-line local/UTC clock widgets | Schema, parser, renderer, example, and deterministic portable tests agree |
-| 2. Split layout and richer widgets | 4–6 days | Row/column weighted splits with gaps, horizontal/vertical utilization bars, status grids, and bounded bitmap regions | The proposed 16×16 storage/WAN/VPS/UTC card renders from synthetic states without hand-calculated child coordinates |
+| 2. Split layout and richer widgets | Complete | Row/column weighted splits with gaps, horizontal/vertical utilization bars, status grids, and bounded bitmap regions | The proposed 16×16 storage/WAN/VPS/UTC card renders from synthetic states without hand-calculated child coordinates |
 | 3. Live composite operations deck | 2–4 days | Apply the layout system to the local deck and exercise transitions, stale states, and failures through Win32 and browser outputs | A repeatable live smoke test observes every composite region and transition |
 | 4. Appliance data adapters | 5–8 days | Read-only TrueNAS and UniFi integrations, followed by the best available Netgear and Starlink signals | Real pool/disk/WAN values drive the same tested widgets; credentials remain named secrets |
 | 5. Windows Bluetooth hardware path | 5–8 days plus device sessions | Send PixelStatus framebuffers from Windows to the physical MI display | Calibration, block writes, pacing, reconnect, and complete-frame restoration are device-validated |
@@ -31,9 +31,23 @@ All bounds are checked while loading configuration. Existing `bitmap`, `clock`, 
 `indicators` cards remain valid. Widget order is paint order, permitting deliberate
 overlays while keeping non-overlapping subsections straightforward.
 
-Stage 2 will treat explicit AABBs as the canonical resolved form. Row/column or
-Mondrian-style splitting is configuration convenience that deterministically
-produces those bounds; output drivers never interpret layout trees.
+## Stage 2: Split Layout and Richer Widgets
+
+Status: complete on the Windows host and portable core test targets as of 2026-08-21.
+
+Explicit AABBs remain the canonical resolved form. A recursive `row` or `column`
+tree is configuration convenience that deterministically allocates fixed `size` and
+proportional `weight` children, including gaps, before rendering. Allocation uses
+cumulative integer division so every platform resolves the same remainder pixels.
+Output drivers never interpret the tree.
+
+Layout cards now support numeric bars in four fill directions, row-major status
+grids, exact-size bounded palette bitmaps, status indicators, and bounded local or
+UTC clocks. Parser limits bound nesting, total nodes, leaf widgets, and all resolved
+geometry. [`split-layout.example.json`](../examples/split-layout.example.json)
+implements the proposed 16×16 storage/WAN/VPS/UTC composition, and
+`tools/test-split-layout.ps1` drives its numeric and status sources through the push
+API before checking the browser framebuffer.
 
 ## Stage 5: Windows Bluetooth Hardware Path
 

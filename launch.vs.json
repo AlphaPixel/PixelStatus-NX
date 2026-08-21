@@ -224,6 +224,22 @@
       ]
     },
     {
+      "name": "Simulator - Split Layout Widgets",
+      "projectTarget": "pixelstatus_simulator.exe (Debug\\pixelstatus_simulator.exe)",
+      "program": "${cmake.binaryDir}/Debug/pixelstatus_simulator.exe",
+      "args": [
+        "${workspaceRoot}/examples/split-layout.example.json",
+        "--api-token",
+        "pixelstatus-vs-debug",
+        "--api-port",
+        "18927",
+        "--web-display-port",
+        "18928",
+        "--web-refresh-ms",
+        "33"
+      ]
+    },
+    {
       "name": "Simulator - Local Operations",
       "projectTarget": "pixelstatus_simulator.exe (Debug\\pixelstatus_simulator.exe)",
       "program": "${cmake.binaryDir}/Debug/pixelstatus_simulator.exe",

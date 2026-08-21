@@ -42,10 +42,14 @@ The same rendered framebuffer is also available through a responsive
 [Browser Display Backend](docs/http-display.md), including a read-only frame API and
 headless host mode.
 The renderer can cycle bitmap, two-line local/UTC clock, live indicator, and
-explicit-AABB composite cards through instant, fade, or four-direction slide
-transitions. See
+composite cards through instant, fade, or four-direction slide transitions.
+Composite layouts support explicit AABBs or deterministic row/column splits plus
+status indicators, clocks, numeric utilization bars, status grids, and bounded
+bitmaps. See
 [Card Decks](docs/card-decks.md) and the runnable
 [`card-deck.example.json`](examples/card-deck.example.json).
+The complete split-widget example is
+[`split-layout.example.json`](examples/split-layout.example.json).
 Site-specific monitor inventories belong in the ignored
 `examples/operations.local.json` profile so LAN addresses, private hostnames, and
 operational notes cannot be staged accidentally.

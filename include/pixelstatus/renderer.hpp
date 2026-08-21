@@ -15,6 +15,7 @@ struct RenderReport {
     std::size_t rendered_indicators{};
     std::size_t missing_sources{};
     std::size_t missing_statuses{};
+    std::size_t invalid_values{};
     std::string active_card;
     std::string next_card;
     bool transitioning{};

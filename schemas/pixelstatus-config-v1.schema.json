@@ -842,6 +842,144 @@
             "width": {"type": "integer", "minimum": 15, "maximum": 256},
             "height": {"type": "integer", "minimum": 7, "maximum": 256}
           }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "type", "source", "x", "y", "width", "height"],
+          "properties": {
+            "id": {"$ref": "#/$defs/identifier"},
+            "type": {"const": "bar"},
+            "source": {"$ref": "#/$defs/identifier"},
+            "x": {"type": "integer", "minimum": 0, "maximum": 256},
+            "y": {"type": "integer", "minimum": 0, "maximum": 256},
+            "width": {"type": "integer", "minimum": 1, "maximum": 256},
+            "height": {"type": "integer", "minimum": 1, "maximum": 256},
+            "direction": {"enum": ["right", "left", "up", "down"]},
+            "minimum": {"type": "number"},
+            "maximum": {"type": "number"},
+            "track_color": {"$ref": "#/$defs/color"}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "type", "sources", "columns", "x", "y", "width", "height"],
+          "properties": {
+            "id": {"$ref": "#/$defs/identifier"},
+            "type": {"const": "status_grid"},
+            "sources": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 1024,
+              "items": {"$ref": "#/$defs/identifier"}
+            },
+            "columns": {"type": "integer", "minimum": 1, "maximum": 1024},
+            "gap": {"type": "integer", "minimum": 0, "maximum": 256},
+            "x": {"type": "integer", "minimum": 0, "maximum": 256},
+            "y": {"type": "integer", "minimum": 0, "maximum": 256},
+            "width": {"type": "integer", "minimum": 1, "maximum": 256},
+            "height": {"type": "integer", "minimum": 1, "maximum": 256}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "type", "palette", "pixels", "x", "y", "width", "height"],
+          "properties": {
+            "id": {"$ref": "#/$defs/identifier"},
+            "type": {"const": "bitmap"},
+            "palette": {
+              "type": "object",
+              "minProperties": 1,
+              "maxProperties": 32,
+              "propertyNames": {"minLength": 1, "maxLength": 1, "pattern": "^[ -~]$"},
+              "additionalProperties": {"$ref": "#/$defs/color"}
+            },
+            "pixels": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 256,
+              "items": {"type": "string", "minLength": 1, "maxLength": 256}
+            },
+            "x": {"type": "integer", "minimum": 0, "maximum": 256},
+            "y": {"type": "integer", "minimum": 0, "maximum": 256},
+            "width": {"type": "integer", "minimum": 1, "maximum": 256},
+            "height": {"type": "integer", "minimum": 1, "maximum": 256}
+          }
+        }
+      ]
+    },
+    "layoutNode": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "children"],
+          "properties": {
+            "type": {"enum": ["row", "column"]},
+            "gap": {"type": "integer", "minimum": 0, "maximum": 256},
+            "size": {"type": "integer", "minimum": 1, "maximum": 256},
+            "weight": {"type": "integer", "minimum": 1, "maximum": 1000000},
+            "children": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 1024,
+              "items": {"$ref": "#/$defs/layoutNode"}
+            }
+          },
+          "not": {"required": ["size", "weight"]}
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "type"],
+          "properties": {
+            "id": {"$ref": "#/$defs/identifier"},
+            "type": {"enum": ["indicator", "clock", "bar", "status_grid", "bitmap"]},
+            "source": {"$ref": "#/$defs/identifier"},
+            "sources": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 1024,
+              "items": {"$ref": "#/$defs/identifier"}
+            },
+            "timezone": {"enum": ["local", "utc"]},
+            "color": {"$ref": "#/$defs/color"},
+            "direction": {"enum": ["right", "left", "up", "down"]},
+            "minimum": {"type": "number"},
+            "maximum": {"type": "number"},
+            "track_color": {"$ref": "#/$defs/color"},
+            "columns": {"type": "integer", "minimum": 1, "maximum": 1024},
+            "gap": {"type": "integer", "minimum": 0, "maximum": 256},
+            "palette": {
+              "type": "object",
+              "minProperties": 1,
+              "maxProperties": 32,
+              "propertyNames": {"minLength": 1, "maxLength": 1, "pattern": "^[ -~]$"},
+              "additionalProperties": {"$ref": "#/$defs/color"}
+            },
+            "pixels": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 256,
+              "items": {"type": "string", "minLength": 1, "maxLength": 256}
+            },
+            "size": {"type": "integer", "minimum": 1, "maximum": 256},
+            "weight": {"type": "integer", "minimum": 1, "maximum": 1000000}
+          },
+          "allOf": [
+            {"not": {"required": ["size", "weight"]}},
+            {
+              "oneOf": [
+                {"properties": {"type": {"const": "indicator"}}, "required": ["source"]},
+                {"properties": {"type": {"const": "clock"}}, "required": ["timezone"]},
+                {"properties": {"type": {"const": "bar"}}, "required": ["source"]},
+                {"properties": {"type": {"const": "status_grid"}}, "required": ["sources", "columns"]},
+                {"properties": {"type": {"const": "bitmap"}}, "required": ["palette", "pixels"]}
+              ]
+            }
+          ]
         }
       ]
     },
@@ -912,7 +1050,11 @@
         {
           "type": "object",
           "additionalProperties": false,
-          "required": ["id", "type", "hold", "widgets"],
+          "required": ["id", "type", "hold"],
+          "oneOf": [
+            {"required": ["widgets"], "not": {"required": ["root"]}},
+            {"required": ["root"], "not": {"required": ["widgets"]}}
+          ],
           "properties": {
             "id": {"$ref": "#/$defs/identifier"},
             "type": {"const": "layout"},
@@ -923,6 +1065,12 @@
               "minItems": 1,
               "maxItems": 1024,
               "items": {"$ref": "#/$defs/layoutWidget"}
+            },
+            "root": {
+              "allOf": [
+                {"$ref": "#/$defs/layoutNode"},
+                {"not": {"anyOf": [{"required": ["size"]}, {"required": ["weight"]}]}}
+              ]
             }
           }
         }

@@ -3,8 +3,10 @@
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <cmath>
 #include <cstdint>
 #include <ctime>
+#include <optional>
 #include <variant>
 
 namespace pixelstatus {
@@ -27,25 +29,31 @@ void merge_report(RenderReport& target, const RenderReport& source) {
     target.rendered_indicators += source.rendered_indicators;
     target.missing_sources += source.missing_sources;
     target.missing_statuses += source.missing_statuses;
+    target.invalid_values += source.invalid_values;
     if (!source.success && target.error.empty()) {
         target.error = source.error;
     }
 }
 
-bool render_indicator(
+struct SourceSample {
+    std::optional<ResolvedState> state;
+    std::optional<Rgb> color;
+};
+
+SourceSample sample_source(
     const StateStore& states,
     const AppConfig& config,
-    const IndicatorConfig& indicator,
+    const std::string& source,
     TimePoint now,
     TimePoint animation_origin,
-    RenderReport& report,
-    Frame& output) {
-    const auto resolved = states.resolve(indicator.source, now);
+    RenderReport& report) {
+    SourceSample sample;
+    sample.state = states.resolve(source, now);
     std::string status = "unknown";
     auto entered_at = animation_origin;
-    if (resolved) {
-        status = resolved->effective_status;
-        entered_at = resolved->status_entered_at;
+    if (sample.state) {
+        status = sample.state->effective_status;
+        entered_at = sample.state->status_entered_at;
     } else {
         ++report.missing_sources;
     }
@@ -56,24 +64,179 @@ bool render_indicator(
         appearance = config.statuses.find("unknown");
     }
     if (appearance == config.statuses.end()) {
-        return true;
+        return sample;
     }
 
     auto elapsed = std::chrono::duration_cast<Duration>(now - entered_at);
     if (elapsed < Duration::zero()) {
         elapsed = Duration::zero();
     }
-    const auto color = appearance->second.sample(elapsed);
+    sample.color = appearance->second.sample(elapsed);
+    return sample;
+}
+
+bool render_indicator(
+    const StateStore& states,
+    const AppConfig& config,
+    const IndicatorConfig& indicator,
+    TimePoint now,
+    TimePoint animation_origin,
+    RenderReport& report,
+    Frame& output) {
+    const auto sample = sample_source(
+        states, config, indicator.source, now, animation_origin, report);
+    if (!sample.color) {
+        return true;
+    }
     if (!output.fill_rect(
             indicator.x,
             indicator.y,
             indicator.width,
             indicator.height,
-            color)) {
+            *sample.color)) {
         report.error = "Indicator layout became invalid during rendering";
         return false;
     }
     ++report.rendered_indicators;
+    return true;
+}
+
+[[nodiscard]] std::optional<double> numeric_value(const StateValue& value) {
+    if (const auto* integer = std::get_if<std::int64_t>(&value)) {
+        return static_cast<double>(*integer);
+    }
+    if (const auto* real = std::get_if<double>(&value); real != nullptr
+        && std::isfinite(*real)) {
+        return *real;
+    }
+    return std::nullopt;
+}
+
+bool render_bar(
+    const StateStore& states,
+    const AppConfig& config,
+    const LayoutBarConfig& bar,
+    TimePoint now,
+    TimePoint animation_origin,
+    RenderReport& report,
+    Frame& output) {
+    if (!output.fill_rect(
+            bar.x, bar.y, bar.width, bar.height, bar.track_color)) {
+        report.error = "Layout bar bounds became invalid during rendering";
+        return false;
+    }
+    const auto sample = sample_source(
+        states, config, bar.source, now, animation_origin, report);
+    ++report.rendered_indicators;
+    if (!sample.state || !sample.color) {
+        return true;
+    }
+    const auto value = numeric_value(sample.state->state.value);
+    if (!value) {
+        ++report.invalid_values;
+        return true;
+    }
+    const auto raw_fraction =
+        (*value - bar.minimum) / (bar.maximum - bar.minimum);
+    if (!std::isfinite(raw_fraction)) {
+        ++report.invalid_values;
+        return true;
+    }
+    const auto fraction = std::clamp(raw_fraction, 0.0, 1.0);
+    const auto horizontal = bar.direction == BarDirection::right
+        || bar.direction == BarDirection::left;
+    const auto extent = horizontal ? bar.width : bar.height;
+    const auto filled = std::min(
+        extent,
+        static_cast<std::size_t>(std::floor(fraction * static_cast<double>(extent) + 0.5)));
+    if (filled == 0U) {
+        return true;
+    }
+    auto x = bar.x;
+    auto y = bar.y;
+    auto width = bar.width;
+    auto height = bar.height;
+    if (horizontal) {
+        width = filled;
+        if (bar.direction == BarDirection::left) {
+            x += bar.width - filled;
+        }
+    } else {
+        height = filled;
+        if (bar.direction == BarDirection::up) {
+            y += bar.height - filled;
+        }
+    }
+    if (!output.fill_rect(x, y, width, height, *sample.color)) {
+        report.error = "Layout bar fill became invalid during rendering";
+        return false;
+    }
+    return true;
+}
+
+bool render_status_grid(
+    const StateStore& states,
+    const AppConfig& config,
+    const LayoutStatusGridConfig& grid,
+    TimePoint now,
+    TimePoint animation_origin,
+    RenderReport& report,
+    Frame& output) {
+    if (grid.sources.empty() || grid.columns == 0U
+        || grid.columns > grid.sources.size()) {
+        report.error = "Layout status grid configuration became invalid during rendering";
+        return false;
+    }
+    const auto rows = (grid.sources.size() + grid.columns - 1U) / grid.columns;
+    const auto horizontal_gaps = grid.gap * (grid.columns - 1U);
+    const auto vertical_gaps = grid.gap * (rows - 1U);
+    if (horizontal_gaps > grid.width || grid.width - horizontal_gaps < grid.columns
+        || vertical_gaps > grid.height || grid.height - vertical_gaps < rows) {
+        report.error = "Layout status grid geometry became invalid during rendering";
+        return false;
+    }
+    const auto usable_width = grid.width - horizontal_gaps;
+    const auto usable_height = grid.height - vertical_gaps;
+    for (std::size_t index = 0; index < grid.sources.size(); ++index) {
+        const auto column = index % grid.columns;
+        const auto row = index / grid.columns;
+        const auto left = usable_width * column / grid.columns;
+        const auto right = usable_width * (column + 1U) / grid.columns;
+        const auto top = usable_height * row / rows;
+        const auto bottom = usable_height * (row + 1U) / rows;
+        const auto sample = sample_source(
+            states, config, grid.sources[index], now, animation_origin, report);
+        ++report.rendered_indicators;
+        if (!sample.color) {
+            continue;
+        }
+        if (!output.fill_rect(
+                grid.x + left + column * grid.gap,
+                grid.y + top + row * grid.gap,
+                right - left,
+                bottom - top,
+                *sample.color)) {
+            report.error = "Layout status grid bounds became invalid during rendering";
+            return false;
+        }
+    }
+    return true;
+}
+
+bool render_layout_bitmap(
+    const LayoutBitmapConfig& bitmap,
+    RenderReport& report,
+    Frame& output) {
+    for (std::size_t y = 0; y < bitmap.pixels.size(); ++y) {
+        for (std::size_t x = 0; x < bitmap.pixels[y].size(); ++x) {
+            const auto color = bitmap.palette.find(bitmap.pixels[y][x]);
+            if (color == bitmap.palette.end()
+                || !output.set_pixel(bitmap.x + x, bitmap.y + y, color->second)) {
+                report.error = "Layout bitmap became invalid during rendering";
+                return false;
+            }
+        }
+    }
     return true;
 }
 
@@ -191,6 +354,38 @@ RenderReport render_card(
                         animation_origin,
                         report,
                         output)) {
+                    return report;
+                }
+                continue;
+            }
+            if (const auto* bar = std::get_if<LayoutBarConfig>(&widget)) {
+                if (!render_bar(
+                        states,
+                        config,
+                        *bar,
+                        now,
+                        animation_origin,
+                        report,
+                        output)) {
+                    return report;
+                }
+                continue;
+            }
+            if (const auto* grid = std::get_if<LayoutStatusGridConfig>(&widget)) {
+                if (!render_status_grid(
+                        states,
+                        config,
+                        *grid,
+                        now,
+                        animation_origin,
+                        report,
+                        output)) {
+                    return report;
+                }
+                continue;
+            }
+            if (const auto* bitmap = std::get_if<LayoutBitmapConfig>(&widget)) {
+                if (!render_layout_bitmap(*bitmap, report, output)) {
                     return report;
                 }
                 continue;

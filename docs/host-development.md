@@ -48,6 +48,7 @@ adds these shared entries to the **Startup Item** dropdown:
 | `Simulator - HTTPS Monitor` | Public HTTPS system-trust check | Status API `18887`, browser `18888` |
 | `Simulator - Card Deck (Real Monitors)` | Logo, local/UTC clock, LAN/WAN, and public-server cards | Status API `18897`, browser `18898` |
 | `Simulator - AABB Layout Card` | Composite status regions and a bounded UTC clock | Status API `18917`, browser `18918` |
+| `Simulator - Split Layout Widgets` | Weighted splits, bars, grids, and bounded UTC clock | Status API `18927`, browser `18928` |
 | `Simulator - Local Operations` | Optional ignored site-specific profile | Status API `18907`, browser `18908` |
 | `Simulator - Concurrent HTTP Monitors` | Headless two-monitor slow/fast concurrency example | Status API `18837`, browser `18838` |
 | `Simulator - TCP Connect Monitor` | Headless TCP-connect latency example | Status API `18847`, browser `18848` |
@@ -124,6 +125,14 @@ browser framebuffer API without network fixtures:
 
 ```powershell
 .\tools\test-layout-card.ps1
+```
+
+The split-layout smoke test pushes deterministic numeric and status states, then
+checks the resolved bars, grids, separator, and UTC clock through the same browser
+framebuffer API:
+
+```powershell
+.\tools\test-split-layout.ps1
 ```
 
 Site-specific monitoring can be exercised with the ignored
@@ -290,7 +299,8 @@ suitable application service.
 
 The simulator supports:
 
-- legacy fixed layouts or timed decks of bitmap, clock, and indicator cards;
+- fixed layouts or timed decks of bitmap, clock, indicator, and composite cards;
+- deterministic row/column splits with bars, status grids, and bounded bitmaps;
 - instant, fade, and four-direction slide transitions between cards;
 - solid, blink, toggle, fade, pulse, sequence, and color-cycle appearances;
 - a periodic status transition;

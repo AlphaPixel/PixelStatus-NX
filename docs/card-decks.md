@@ -76,14 +76,15 @@ push-state IDs.
 }
 ```
 
-## Explicit-AABB Layout Cards
+## Composite Layout Cards
 
 A `layout` card composes different widget types in one frame. Every widget has
-explicit `x`, `y`, `width`, and `height` bounds, checked against the configured
-display while loading the file. Widgets render in array order, so a later widget may
-deliberately paint over an earlier one.
+resolved `x`, `y`, `width`, and `height` bounds checked against the configured
+display while loading the file. A card contains exactly one of an explicit `widgets`
+array or a split-tree `root`. Widgets render in resolved order, so later explicit
+widgets may deliberately paint over earlier ones.
 
-The initial layout milestone supports status indicators and a one-line clock:
+The explicit form remains useful for direct placement:
 
 ```json
 {
@@ -119,9 +120,70 @@ bounds are larger. `timezone` is `local` or `utc`; omitted colors default to blu
 for local time and yellow for UTC. Widget IDs are unique within their card.
 
 [`layout-card.example.json`](../examples/layout-card.example.json) is a runnable
-16×16 composite example. Weighted row/column splitting, utilization bars, status
-grids, and bounded bitmaps are the next layout milestone; they will resolve to the
-same explicit AABB representation before rendering.
+16×16 explicit composite example.
+
+### Split trees
+
+A split tree uses `row` containers for left-to-right allocation and `column`
+containers for top-to-bottom allocation. A container may set a non-negative `gap`.
+Each child chooses either a fixed pixel `size` along the parent axis or a positive
+`weight`; omitting both means `weight: 1`. Fixed children and gaps are removed first,
+then weighted children share the remaining pixels. Cumulative integer division
+assigns remainder pixels deterministically. Every child must receive at least one
+pixel. If a container has only fixed children, their sizes plus gaps must consume
+its complete axis.
+
+Leaves omit coordinates because they inherit their resolved rectangle:
+
+```json
+{
+  "id": "operations",
+  "type": "layout",
+  "hold": "1h",
+  "root": {
+    "type": "column",
+    "gap": 1,
+    "children": [
+      {
+        "type": "row",
+        "weight": 1,
+        "children": [
+          {"id": "disk", "type": "bar", "source": "disk", "direction": "right"},
+          {"id": "wan", "type": "bar", "source": "wan", "direction": "up"}
+        ]
+      },
+      {"id": "utc", "type": "clock", "timezone": "utc", "size": 7}
+    ]
+  }
+}
+```
+
+The parser flattens this tree into the same explicit AABBs before returning the
+configuration. The renderer and every output backend remain unaware of split trees.
+Nesting is limited to 16 levels, 2,048 total nodes, and 1,024 resolved widgets.
+
+### Layout widgets
+
+- `indicator` fills its complete bounds with the source's effective status
+  appearance.
+- `clock` draws a centered 15×7 local or UTC time and therefore requires bounds of
+  at least that size.
+- `bar` reads a numeric source value. `minimum` and `maximum` default to 0 and 100;
+  `direction` defaults to `right` and also accepts `left`, `up`, or `down`. The fill
+  color is the source's status appearance and `track_color` defaults to the display
+  background. Values clamp to the configured range and fill length rounds to the
+  nearest pixel. Missing or non-numeric values leave only the track visible.
+- `status_grid` paints its `sources` row-major across the required `columns`. Its
+  optional `gap` defaults to zero. Uneven cell pixels are distributed
+  deterministically, and unused cells in the last row retain the background.
+- `bitmap` maps palette characters to pixels exactly within its resolved bounds;
+  rows and columns must match those bounds. It does not scale artwork.
+
+All five widgets are accepted in explicit `widgets`; split-tree leaves use the same
+fields but replace coordinates with optional `size` or `weight`.
+
+[`split-layout.example.json`](../examples/split-layout.example.json) is the complete
+16×16 storage-bar, drive-grid, dual-WAN, VPS-grid, and UTC-clock example.
 
 ## Real-Monitor Starter Deck
 

@@ -151,6 +151,9 @@ if(PIXELSTATUS_BUILD_SIMULATOR)
             ${CMAKE_CURRENT_SOURCE_DIR}/examples/layout-card.example.json
             $<TARGET_FILE_DIR:pixelstatus_simulator>/layout-card.example.json
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            ${CMAKE_CURRENT_SOURCE_DIR}/examples/split-layout.example.json
+            $<TARGET_FILE_DIR:pixelstatus_simulator>/split-layout.example.json
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
             ${CMAKE_CURRENT_SOURCE_DIR}/examples/concurrent-monitors.example.json
             $<TARGET_FILE_DIR:pixelstatus_simulator>/concurrent-monitors.example.json
         COMMAND ${CMAKE_COMMAND} -E copy_if_different

@@ -30,7 +30,9 @@ changing the transport contract.
 
 The root must contain exactly one presentation form: `indicators` for a permanent
 layout, or `cards` for a timed deck. Cards may contain a palette bitmap, a two-line
-local/UTC clock, their own indicator layout, or an explicit-AABB composite layout.
+local/UTC clock, their own indicator layout, or a composite layout. Composite
+layouts accept either explicit AABB widgets or a recursive row/column split tree;
+both resolve to the same portable widget representation.
 See [Card Decks](card-decks.md) for the complete card and transition grammar.
 
 Durations are integer strings using `ms`, `s`, `m`, or `h`, such as `250ms`, `2s`,

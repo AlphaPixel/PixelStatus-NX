@@ -1,0 +1,83 @@
+{
+  "schema_version": 1,
+  "display": {
+    "width": 16,
+    "height": 16,
+    "background": "#02050A"
+  },
+  "statuses": {
+    "ok": {"appearance": {"solid": "#00C853"}},
+    "warn": {"appearance": {"solid": "#FFD600"}},
+    "fail": {"appearance": {"solid": "#FF1744"}},
+    "stale": {"appearance": {"solid": "#FF9100"}},
+    "unknown": {"appearance": {"solid": "#6200EA"}}
+  },
+  "cards": [
+    {
+      "id": "split-operations",
+      "type": "layout",
+      "hold": "1h",
+      "root": {
+        "type": "column",
+        "gap": 1,
+        "children": [
+          {
+            "type": "row",
+            "weight": 1,
+            "children": [
+              {
+                "type": "column",
+                "weight": 1,
+                "children": [
+                  {"id": "disk-0", "type": "bar", "source": "disk-0", "direction": "right"},
+                  {"id": "disk-1", "type": "bar", "source": "disk-1", "direction": "right"},
+                  {"id": "disk-2", "type": "bar", "source": "disk-2", "direction": "right"},
+                  {"id": "disk-3", "type": "bar", "source": "disk-3", "direction": "right"}
+                ]
+              },
+              {
+                "id": "drive-health",
+                "type": "status_grid",
+                "weight": 1,
+                "columns": 4,
+                "sources": [
+                  "drive-01", "drive-02", "drive-03", "drive-04",
+                  "drive-05", "drive-06", "drive-07", "drive-08",
+                  "drive-09", "drive-10", "drive-11", "drive-12",
+                  "drive-13", "drive-14", "drive-15", "drive-16"
+                ]
+              },
+              {
+                "type": "row",
+                "weight": 1,
+                "children": [
+                  {"id": "wan-primary", "type": "bar", "source": "wan-primary", "direction": "up"},
+                  {"id": "wan-secondary", "type": "bar", "source": "wan-secondary", "direction": "up"}
+                ]
+              },
+              {
+                "id": "vps-health",
+                "type": "status_grid",
+                "weight": 1,
+                "columns": 4,
+                "sources": [
+                  "vps-01", "vps-02", "vps-03", "vps-04",
+                  "vps-05", "vps-06", "vps-07", "vps-08",
+                  "vps-09", "vps-10", "vps-11", "vps-12",
+                  "vps-13", "vps-14", "vps-15", "vps-16"
+                ]
+              }
+            ]
+          },
+          {
+            "id": "utc",
+            "type": "clock",
+            "timezone": "utc",
+            "color": "#FFD600",
+            "size": 7
+          }
+        ]
+      }
+    }
+  ]
+}
