@@ -10,7 +10,7 @@ time and exclude delays obtaining credentials, network access, or physical hardw
 | 0. Host monitoring foundation | Complete | Portable state/rendering core; Win32 and browser outputs; HTTP(S), TCP, DNS, and ICMP host monitors | Public tests and the ignored local operations deck pass |
 | 1. Explicit-AABB composite cards | 2–3 days | Additive `layout` card containing bounded indicator and one-line local/UTC clock widgets | Schema, parser, renderer, example, and deterministic portable tests agree |
 | 2. Split layout and richer widgets | Complete | Row/column weighted splits with gaps, horizontal/vertical utilization bars, status grids, and bounded bitmap regions | The proposed 16×16 storage/WAN/VPS/UTC card renders from synthetic states without hand-calculated child coordinates |
-| 3. Live composite operations deck | 2–4 days | Apply the layout system to the local deck and exercise transitions, stale states, and failures through Win32 and browser outputs | A repeatable live smoke test observes every composite region and transition |
+| 3. Live composite operations deck | Complete | Apply the layout system to the local deck and exercise transitions, stale states, and failures through Win32 and browser outputs | A repeatable live smoke test observes every composite region and transition |
 | 4. Appliance data adapters | 5–8 days | Read-only TrueNAS and UniFi integrations, followed by the best available Netgear and Starlink signals | Real pool/disk/WAN values drive the same tested widgets; credentials remain named secrets |
 | 5. Windows Bluetooth hardware path | 5–8 days plus device sessions | Send PixelStatus framebuffers from Windows to the physical MI display | Calibration, block writes, pacing, reconnect, and complete-frame restoration are device-validated |
 | 6. Bluetooth output hardening | 3–5 days | Frame coalescing, sparse/full-frame policy, health reporting, and soak tests | Slow or disconnected BLE never blocks rendering and the newest complete frame wins |
@@ -48,6 +48,23 @@ geometry. [`split-layout.example.json`](../examples/split-layout.example.json)
 implements the proposed 16×16 storage/WAN/VPS/UTC composition, and
 `tools/test-split-layout.ps1` drives its numeric and status sources through the push
 API before checking the browser framebuffer.
+
+## Stage 3: Live Composite Operations Deck
+
+Status: complete on the Windows host as of 2026-08-21.
+
+The ignored local operations profile now renders infrastructure as a 3×2 status
+grid and all eleven VPS sources as one four-column grid with a blank twelfth cell.
+Its ignored integration test validates the live LAN and Internet monitor results,
+all four cards, and intermediate framebuffer states from the fade and slide
+transitions. It then injects a controlled `fail` state and a one-second TTL state,
+confirming both failure and animated stale rendering before the deck wraps.
+
+The acceptance run verified UniFi, TrueNAS CORE, the Netgear cable modem, the HP
+printer, ten HTTPS VPS endpoints, and the Lima ICMP endpoint. The Starlink slot
+remains an explicit unknown placeholder until a management route or proxy becomes
+available. Addresses, hostnames, observations, and the test itself remain in
+Git-ignored local files.
 
 ## Stage 5: Windows Bluetooth Hardware Path
 
