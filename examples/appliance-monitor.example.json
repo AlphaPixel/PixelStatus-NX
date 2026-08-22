@@ -1,0 +1,162 @@
+{
+  "schema_version": 1,
+  "display": {
+    "width": 16,
+    "height": 16,
+    "background": "#02050A"
+  },
+  "statuses": {
+    "ok": {"appearance": {"solid": "#00C853"}},
+    "warn": {"appearance": {"solid": "#FFD600"}},
+    "fail": {"appearance": {"solid": "#FF1744"}},
+    "communication_failure": {"appearance": {"solid": "#FF00FF"}},
+    "stale": {"appearance": {"solid": "#FF9100"}},
+    "unknown": {"appearance": {"solid": "#6200EA"}}
+  },
+  "monitors": [
+    {
+      "id": "truenas-pool-health",
+      "type": "http",
+      "url": "http://127.0.0.1:18080/appliance/truenas",
+      "headers": {"Authorization": "Bearer ${secret:truenas-api-key}"},
+      "interval": "10s",
+      "ttl": "30s",
+      "timeout": "2s",
+      "maximum_response_bytes": 4096,
+      "observe": {"json_pointer": "/pools/0/status"},
+      "evaluate": [
+        {"when": {"value": {"equals": "ONLINE"}}, "status": "ok"},
+        {"otherwise": {"status": "fail"}}
+      ]
+    },
+    {
+      "id": "truenas-alert-count",
+      "type": "http",
+      "url": "http://127.0.0.1:18080/appliance/truenas",
+      "headers": {"Authorization": "Bearer ${secret:truenas-api-key}"},
+      "interval": "10s",
+      "ttl": "30s",
+      "timeout": "2s",
+      "maximum_response_bytes": 4096,
+      "observe": {"json_array_length": "/alerts"},
+      "evaluate": [
+        {"when": {"value": {"greater_or_equal": 2}}, "status": "fail"},
+        {"when": {"value": {"greater_or_equal": 1}}, "status": "warn"},
+        {"otherwise": {"status": "ok"}}
+      ]
+    },
+    {
+      "id": "truenas-storage-used",
+      "type": "http",
+      "url": "http://127.0.0.1:18080/appliance/truenas",
+      "headers": {"Authorization": "Bearer ${secret:truenas-api-key}"},
+      "interval": "10s",
+      "ttl": "30s",
+      "timeout": "2s",
+      "maximum_response_bytes": 4096,
+      "observe": {
+        "json_ratio": {
+          "numerator": "/pools/0/used_bytes",
+          "denominator": "/pools/0/total_bytes",
+          "scale": 100
+        }
+      },
+      "evaluate": [
+        {"when": {"value": {"greater_or_equal": 90}}, "status": "fail"},
+        {"when": {"value": {"greater_or_equal": 75}}, "status": "warn"},
+        {"otherwise": {"status": "ok"}}
+      ]
+    },
+    {
+      "id": "unifi-device-state",
+      "type": "http",
+      "url": "http://127.0.0.1:18080/appliance/unifi",
+      "headers": {"X-API-Key": "${secret:unifi-api-key}"},
+      "interval": "10s",
+      "ttl": "30s",
+      "timeout": "2s",
+      "maximum_response_bytes": 4096,
+      "observe": {"json_pointer": "/state"},
+      "evaluate": [
+        {"when": {"value": {"equals": "ONLINE"}}, "status": "ok"},
+        {"otherwise": {"status": "fail"}}
+      ]
+    },
+    {
+      "id": "unifi-wan-utilization",
+      "type": "http",
+      "url": "http://127.0.0.1:18080/appliance/unifi",
+      "headers": {"X-API-Key": "${secret:unifi-api-key}"},
+      "interval": "10s",
+      "ttl": "30s",
+      "timeout": "2s",
+      "maximum_response_bytes": 4096,
+      "observe": {
+        "json_ratio": {
+          "numerator": "/wan/tx_bps",
+          "denominator": "/wan/capacity_bps",
+          "scale": 100
+        }
+      },
+      "evaluate": [
+        {"when": {"value": {"greater_or_equal": 90}}, "status": "fail"},
+        {"when": {"value": {"greater_or_equal": 70}}, "status": "warn"},
+        {"otherwise": {"status": "ok"}}
+      ]
+    }
+  ],
+  "cards": [
+    {
+      "id": "appliance-overview",
+      "type": "layout",
+      "hold": "1h",
+      "root": {
+        "type": "column",
+        "gap": 1,
+        "children": [
+          {
+            "type": "row",
+            "weight": 1,
+            "children": [
+              {
+                "id": "truenas-health",
+                "type": "status_grid",
+                "weight": 1,
+                "columns": 1,
+                "gap": 1,
+                "sources": ["truenas-pool-health", "truenas-alert-count"]
+              },
+              {
+                "id": "truenas-storage",
+                "type": "bar",
+                "source": "truenas-storage-used",
+                "direction": "up",
+                "weight": 1
+              },
+              {
+                "id": "unifi-state",
+                "type": "indicator",
+                "source": "unifi-device-state",
+                "weight": 1
+              },
+              {
+                "id": "unifi-wan",
+                "type": "bar",
+                "source": "unifi-wan-utilization",
+                "direction": "up",
+                "weight": 1
+              }
+            ]
+          },
+          {
+            "id": "utc",
+            "type": "clock",
+            "timezone": "utc",
+            "color": "#FFD600",
+            "size": 7
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -210,6 +210,22 @@ std::optional<StateValue> json_scalar(const Json& value) {
     return std::nullopt;
 }
 
+std::optional<long double> json_number(const Json& value) {
+    if (value.is_number_unsigned()) {
+        return static_cast<long double>(value.get<std::uint64_t>());
+    }
+    if (value.is_number_integer()) {
+        return static_cast<long double>(value.get<std::int64_t>());
+    }
+    if (value.is_number_float()) {
+        const auto number = value.get<double>();
+        if (std::isfinite(number)) {
+            return static_cast<long double>(number);
+        }
+    }
+    return std::nullopt;
+}
+
 HttpTransportResponse perform_httplib_request(
     const HttpMonitorConfig& config,
     const ParsedHttpUrl& url) {
@@ -234,7 +250,8 @@ HttpTransportResponse perform_httplib_request(
         headers.emplace(header.name, header.value);
         has_accept_header = has_accept_header || ascii_lower(header.name) == "accept";
     }
-    if (config.observation == HttpObservation::json_pointer && !has_accept_header) {
+    if (config.observation != HttpObservation::status_code
+        && config.observation != HttpObservation::body && !has_accept_header) {
         headers.emplace("Accept", "application/json");
     }
     result.body.reserve(config.maximum_response_bytes);
@@ -332,7 +349,46 @@ public:
                 result.detail += "; JSON pointer was not found";
                 return result;
             }
-            auto value = json_scalar(document.at(pointer));
+            const auto& selected = document.at(pointer);
+            if (config_.observation == HttpObservation::json_array_length) {
+                if (!selected.is_array()) {
+                    result.transport_success = false;
+                    result.error = MonitorError::invalid_response;
+                    result.detail += "; selected JSON value is not an array";
+                    return result;
+                }
+                result.value = static_cast<std::int64_t>(selected.size());
+                return result;
+            }
+            if (config_.observation == HttpObservation::json_ratio) {
+                const auto denominator_pointer =
+                    Json::json_pointer(config_.json_denominator_pointer);
+                if (!document.contains(denominator_pointer)) {
+                    result.value = std::monostate{};
+                    result.detail += "; JSON denominator pointer was not found";
+                    return result;
+                }
+                const auto numerator = json_number(selected);
+                const auto denominator = json_number(document.at(denominator_pointer));
+                if (!numerator || !denominator || *denominator == 0.0L) {
+                    result.transport_success = false;
+                    result.error = MonitorError::invalid_response;
+                    result.detail += "; JSON ratio requires numeric values and a nonzero denominator";
+                    return result;
+                }
+                const auto ratio = *numerator / *denominator
+                    * static_cast<long double>(config_.json_scale);
+                const auto value = static_cast<double>(ratio);
+                if (!std::isfinite(value)) {
+                    result.transport_success = false;
+                    result.error = MonitorError::invalid_response;
+                    result.detail += "; JSON ratio result is not finite";
+                    return result;
+                }
+                result.value = value;
+                return result;
+            }
+            auto value = json_scalar(selected);
             if (!value) {
                 result.transport_success = false;
                 result.error = MonitorError::invalid_response;
@@ -418,12 +474,22 @@ MonitorRunnerCreationResult create_http_monitor_runner(
     }
     if (config.observation != HttpObservation::status_code
         && config.observation != HttpObservation::body
-        && config.observation != HttpObservation::json_pointer) {
+        && config.observation != HttpObservation::json_pointer
+        && config.observation != HttpObservation::json_array_length
+        && config.observation != HttpObservation::json_ratio) {
         return {nullptr, "HTTP observation is invalid"};
     }
-    if (config.observation == HttpObservation::json_pointer
+    if ((config.observation == HttpObservation::json_pointer
+            || config.observation == HttpObservation::json_array_length
+            || config.observation == HttpObservation::json_ratio)
         && !valid_json_pointer(config.json_pointer)) {
         return {nullptr, "HTTP JSON pointer is invalid"};
+    }
+    if (config.observation == HttpObservation::json_ratio
+        && (!valid_json_pointer(config.json_denominator_pointer)
+            || !std::isfinite(config.json_scale) || config.json_scale <= 0.0
+            || config.json_scale > 1'000'000'000.0)) {
+        return {nullptr, "HTTP JSON ratio configuration is invalid"};
     }
     return {
         std::make_unique<HttpMonitorRunner>(std::move(config), std::move(*url)),

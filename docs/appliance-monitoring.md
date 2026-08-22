@@ -9,9 +9,11 @@ libraries as long as they implement the same `MonitorRunner` result contract.
 
 The desktop HTTP runner currently supports bounded `GET`, `HEAD`, `POST`, `PUT`,
 `PATCH`, and `DELETE` requests with explicit headers and request bodies. It can
-observe response status or body, or extract a scalar with RFC 6901 JSON Pointer.
-Plain HTTP is integration-tested against the loopback fixture. On Windows, HTTPS
-uses WinHTTP/Schannel with system certificate and hostname validation.
+observe response status or body, extract a scalar with RFC 6901 JSON Pointer, count
+a selected JSON array, or calculate a scaled ratio from two numeric pointers. Plain
+HTTP is integration-tested against authenticated TrueNAS- and UniFi-shaped loopback
+fixtures. On Windows, HTTPS uses WinHTTP/Schannel with system certificate and
+hostname validation.
 
 Header values support named `${secret:name}` substitution. The Windows host
 resolves environment variables for development and generic Windows Credential
@@ -90,9 +92,9 @@ Initial mechanism:
 2. Send an API key through `Authorization: Bearer <secret>`.
 3. Begin with a scalar health or system-information request to exercise the generic
    HTTP/JSON runner.
-4. Add bounded JSON array aggregation/filtering, or a small TrueNAS adapter, for
-   pool health and active-alert counts. Scalar JSON Pointer alone cannot summarize
-   an arbitrary collection.
+4. Use the implemented bounded array-length and ratio projections for simple active-
+   alert counts and storage utilization. Filtering alerts or aggregating multiple
+   pools/disks still requires a deliberately bounded adapter or upstream proxy.
 
 The appliance-local `/api/docs/` page is authoritative for the installed CORE
 release. Useful official background includes the
@@ -175,16 +177,21 @@ Official sources:
 ## Remaining Implementation Order
 
 Named secret references, environment/Credential Manager resolution, redaction
-tests, and the WinHTTP/Schannel system-trust runner are complete. Continue with:
+tests, the WinHTTP/Schannel system-trust runner, generic JSON array length, generic
+numeric ratio, authenticated vendor-shaped fixtures, and an end-to-end composite
+display smoke test are complete. Continue with:
 
-1. Add deterministic certificate fixtures for trusted, unknown-CA, hostname-
+1. Compare the installed TrueNAS `/api/docs/` response shapes and UniFi Integrations
+   documentation with the public fixture, then create ignored live profiles using
+   named secrets, local HTTPS names, and the actual site/device identifiers.
+2. Validate pool health, alert count, storage utilization, gateway state, and WAN
+   utilization against the live appliances. Record only sanitized response shapes
+   if the real schemas require another bounded projection.
+3. Add deterministic certificate fixtures for trusted, unknown-CA, hostname-
    mismatch, and pinned-certificate cases; implement per-monitor pinning or private
    CA selection only after that policy is fixed.
-2. Validate one TrueNAS scalar request and one UniFi device-state request against
-   user-supplied fixtures or live appliances; add array aggregation only where a
-   real response requires it.
-3. Build the Starlink desktop sidecar and recorded-response fixtures.
-4. Identify the exact Netgear modem model and decide whether reachability is enough
+4. Build the Starlink desktop sidecar and recorded-response fixtures.
+5. Identify the exact Netgear modem model and decide whether reachability is enough
    or a model-specific proxy is justified.
-5. Keep all of the above host-tested. Add ESP-IDF `esp_http_client` and encrypted-NVS
+6. Keep all of the above host-tested. Add ESP-IDF `esp_http_client` and encrypted-NVS
    adapters only when firmware deployment becomes necessary.

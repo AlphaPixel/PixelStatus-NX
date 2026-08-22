@@ -790,6 +790,35 @@ void test_http_request_configuration() {
     CHECK(http.json_pointer == "/accepted");
 }
 
+void test_appliance_monitor_configuration() {
+    const auto path = std::filesystem::path(PIXELSTATUS_TEST_DATA_DIR)
+        / "appliance-monitor.example.json";
+    const auto loaded = pixelstatus::load_config_file(path);
+    if (!loaded) {
+        for (const auto& error : loaded.errors) {
+            std::cerr << "appliance monitor config error: " << error << '\n';
+        }
+    }
+    CHECK(loaded);
+    CHECK(loaded.config && loaded.config->monitors.size() == 5U);
+    CHECK(loaded.config && loaded.config->cards.size() == 1U);
+    if (!loaded.config || loaded.config->monitors.size() != 5U) {
+        return;
+    }
+
+    const auto& alerts = std::get<pixelstatus::HttpMonitorConfig>(
+        loaded.config->monitors[1].source);
+    CHECK(alerts.observation == pixelstatus::HttpObservation::json_array_length);
+    CHECK(alerts.json_pointer == "/alerts");
+
+    const auto& storage = std::get<pixelstatus::HttpMonitorConfig>(
+        loaded.config->monitors[2].source);
+    CHECK(storage.observation == pixelstatus::HttpObservation::json_ratio);
+    CHECK(storage.json_pointer == "/pools/0/used_bytes");
+    CHECK(storage.json_denominator_pointer == "/pools/0/total_bytes");
+    CHECK(storage.json_scale == 100.0);
+}
+
 void test_tcp_connect_monitor_configuration() {
     const auto path = std::filesystem::path(PIXELSTATUS_TEST_DATA_DIR)
         / "tcp-connect.example.json";
@@ -1870,6 +1899,30 @@ public:
                 authorized ? R"({"authorized":true})" : R"({"authorized":false})",
                 "application/json");
         });
+        server_.Get("/appliance/truenas", [](
+            const httplib::Request& request,
+            httplib::Response& response) {
+            if (request.get_header_value("Authorization") != "Bearer resolved-token") {
+                response.status = 401;
+                response.set_content(R"({"error":"unauthorized"})", "application/json");
+                return;
+            }
+            response.set_content(
+                R"({"pools":[{"status":"ONLINE","used_bytes":750,"total_bytes":1000}],"alerts":[{"level":"WARNING"}],"zero":0})",
+                "application/json");
+        });
+        server_.Get("/appliance/unifi", [](
+            const httplib::Request& request,
+            httplib::Response& response) {
+            if (request.get_header_value("X-API-Key") != "resolved-token") {
+                response.status = 401;
+                response.set_content(R"({"error":"unauthorized"})", "application/json");
+                return;
+            }
+            response.set_content(
+                R"({"state":"ONLINE","wan":{"tx_bps":300000000,"capacity_bps":1000000000}})",
+                "application/json");
+        });
 
         port_ = server_.bind_to_any_port("127.0.0.1");
         if (port_ <= 0) {
@@ -1947,6 +2000,70 @@ void test_host_http_monitor_runner() {
     CHECK(std::holds_alternative<bool>(result.value));
     CHECK(std::get<bool>(result.value));
 
+    const pixelstatus::host::SecretResolver resolver =
+        [](std::string_view name) -> std::optional<std::string> {
+        return name == "unit-api-key"
+            ? std::optional<std::string>{"resolved-token"}
+            : std::nullopt;
+    };
+
+    config.url = server.url("/appliance/truenas");
+    config.method = pixelstatus::HttpMethod::get;
+    config.headers = {{"Authorization", "Bearer ${secret:unit-api-key}"}};
+    config.body.clear();
+    config.observation = pixelstatus::HttpObservation::json_array_length;
+    config.json_pointer = "/alerts";
+    config.json_denominator_pointer.clear();
+    config.json_scale = 1.0;
+    created = pixelstatus::host::create_http_monitor_runner(config, resolver);
+    CHECK(created);
+    result = created.runner->run(std::chrono::steady_clock::now());
+    CHECK(result.transport_success);
+    CHECK(std::holds_alternative<std::int64_t>(result.value));
+    CHECK(std::get<std::int64_t>(result.value) == 1);
+
+    config.json_pointer = "/pools/0";
+    created = pixelstatus::host::create_http_monitor_runner(config, resolver);
+    CHECK(created);
+    result = created.runner->run(std::chrono::steady_clock::now());
+    CHECK(!result.transport_success);
+    CHECK(result.error == pixelstatus::MonitorError::invalid_response);
+
+    config.observation = pixelstatus::HttpObservation::json_ratio;
+    config.json_pointer = "/pools/0/used_bytes";
+    config.json_denominator_pointer = "/pools/0/total_bytes";
+    config.json_scale = 100.0;
+    created = pixelstatus::host::create_http_monitor_runner(config, resolver);
+    CHECK(created);
+    result = created.runner->run(std::chrono::steady_clock::now());
+    CHECK(result.transport_success);
+    CHECK(std::holds_alternative<double>(result.value));
+    CHECK(std::get<double>(result.value) == 75.0);
+
+    config.json_denominator_pointer = "/zero";
+    created = pixelstatus::host::create_http_monitor_runner(config, resolver);
+    CHECK(created);
+    result = created.runner->run(std::chrono::steady_clock::now());
+    CHECK(!result.transport_success);
+    CHECK(result.error == pixelstatus::MonitorError::invalid_response);
+
+    config.url = server.url("/appliance/unifi");
+    config.headers = {{"X-API-Key", "${secret:unit-api-key}"}};
+    config.json_pointer = "/wan/tx_bps";
+    config.json_denominator_pointer = "/wan/capacity_bps";
+    created = pixelstatus::host::create_http_monitor_runner(config, resolver);
+    CHECK(created);
+    result = created.runner->run(std::chrono::steady_clock::now());
+    CHECK(result.transport_success);
+    CHECK(std::holds_alternative<double>(result.value));
+    CHECK(std::get<double>(result.value) == 30.0);
+
+    config.json_denominator_pointer = "/bad~pointer";
+    CHECK(!pixelstatus::host::create_http_monitor_runner(config, resolver));
+    config.json_denominator_pointer = "/wan/capacity_bps";
+    config.json_scale = 0.0;
+    CHECK(!pixelstatus::host::create_http_monitor_runner(config, resolver));
+
     config.url = server.url("/secret");
     config.method = pixelstatus::HttpMethod::get;
     config.headers = {
@@ -1955,12 +2072,6 @@ void test_host_http_monitor_runner() {
     config.body.clear();
     config.observation = pixelstatus::HttpObservation::json_pointer;
     config.json_pointer = "/authorized";
-    const pixelstatus::host::SecretResolver resolver =
-        [](std::string_view name) -> std::optional<std::string> {
-        return name == "unit-api-key"
-            ? std::optional<std::string>{"resolved-token"}
-            : std::nullopt;
-    };
     created = pixelstatus::host::create_http_monitor_runner(config, resolver);
     CHECK(created);
     result = created.runner->run(std::chrono::steady_clock::now());
@@ -2522,6 +2633,7 @@ int main() {
     test_split_layout_rounding_and_bitmap_configuration();
     test_http_monitor_configuration();
     test_http_request_configuration();
+    test_appliance_monitor_configuration();
     test_tcp_connect_monitor_configuration();
     test_dns_monitor_configuration();
     test_tcp_exchange_monitor_configuration();

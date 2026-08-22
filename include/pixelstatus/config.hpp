@@ -142,6 +142,8 @@ enum class HttpObservation {
     status_code,
     body,
     json_pointer,
+    json_array_length,
+    json_ratio,
 };
 
 enum class HttpMethod {
@@ -167,6 +169,8 @@ struct HttpMonitorConfig {
     std::size_t maximum_response_bytes{4U * 1024U};
     HttpObservation observation{HttpObservation::status_code};
     std::string json_pointer;
+    std::string json_denominator_pointer;
+    double json_scale{1.0};
 };
 
 struct TcpConnectMonitorConfig {

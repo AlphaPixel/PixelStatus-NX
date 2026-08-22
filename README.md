@@ -26,8 +26,10 @@ The host monitor-engine layer—normalized monitor results, ordered evaluation r
 and deterministic interval scheduling—is described in
 [Host Monitor Engine](docs/monitor-engine.md).
 Declarative HTTP monitoring with bounded methods, headers, request/response bodies,
-timeouts, status/body/JSON-Pointer observation, and a loopback-tested desktop
-adapter now uses those contracts. A
+timeouts, status/body/JSON-Pointer observation, JSON array counts, numeric ratios,
+and a loopback-tested desktop adapter now uses those contracts. The authenticated
+[`appliance-monitor.example.json`](examples/appliance-monitor.example.json) fixture
+demonstrates TrueNAS/UniFi-shaped health, alert, storage, and WAN values. A
 bounded desktop worker pool prevents one slow check from stalling unrelated
 monitors or either display backend.
 TCP-connect monitoring uses the same scheduler and evaluator while exposing

@@ -254,6 +254,48 @@
               "pattern": "^$|^/"
             }
           }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["json_array_length"],
+          "properties": {
+            "json_array_length": {
+              "type": "string",
+              "maxLength": 512,
+              "pattern": "^$|^/"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["json_ratio"],
+          "properties": {
+            "json_ratio": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["numerator", "denominator"],
+              "properties": {
+                "numerator": {
+                  "type": "string",
+                  "maxLength": 512,
+                  "pattern": "^$|^/"
+                },
+                "denominator": {
+                  "type": "string",
+                  "maxLength": 512,
+                  "pattern": "^$|^/"
+                },
+                "scale": {
+                  "type": "number",
+                  "exclusiveMinimum": 0,
+                  "maximum": 1000000000,
+                  "default": 1
+                }
+              }
+            }
+          }
         }
       ]
     },

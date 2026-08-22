@@ -46,6 +46,7 @@ adds these shared entries to the **Startup Item** dropdown:
 | `Simulator - HTTP Monitor (Native + Browser)` | HTTP/JSON monitor example with both outputs | Status API `18817`, browser `18818` |
 | `Simulator - HTTP Request Monitor` | Authenticated JSON POST with custom headers and body | Status API `18877`, browser `18878` |
 | `Simulator - HTTPS Monitor` | Public HTTPS system-trust check | Status API `18887`, browser `18888` |
+| `Simulator - Appliance Fixture` | Authenticated TrueNAS/UniFi-shaped health, counts, and utilization | Status API `18937`, browser `18938` |
 | `Simulator - Card Deck (Real Monitors)` | Logo, local/UTC clock, LAN/WAN, and public-server cards | Status API `18897`, browser `18898` |
 | `Simulator - AABB Layout Card` | Composite status regions and a bounded UTC clock | Status API `18917`, browser `18918` |
 | `Simulator - Split Layout Widgets` | Weighted splits, bars, grids, and bounded UTC clock | Status API `18927`, browser `18928` |
@@ -77,6 +78,10 @@ The HTTP Request profile also supplies
 `PIXELSTATUS_SECRET_HTTP_REQUEST_TOKEN=desktop-example` as a deliberately
 non-secret fixture. It exercises the same named-secret resolution used by
 production headers.
+
+The Appliance Fixture profile supplies two deliberately public fixture secrets. Run
+`python .\tools\mock-health-server.py` first; no real appliance address or
+credential is used by this profile.
 
 Visual Studio normally discovers root launch profiles automatically. If they are
 hidden, choose **Show/Hide Debug Targets** from the Startup Item dropdown. A local
@@ -133,6 +138,14 @@ framebuffer API:
 
 ```powershell
 .\tools\test-split-layout.ps1
+```
+
+The appliance smoke test starts the authenticated fixture and simulator, verifies
+five TrueNAS/UniFi-shaped monitor states, then checks their grid, bars, indicator,
+and UTC clock through the browser framebuffer API:
+
+```powershell
+.\tools\test-appliance-monitor.ps1
 ```
 
 Site-specific monitoring can be exercised with the ignored
@@ -286,6 +299,8 @@ Each configured monitor can have only one request in flight at a time. See
 single-monitor configuration and
 [`http-request.example.json`](../examples/http-request.example.json) for a JSON
 `POST` with a named-secret request header and body, and
+[`appliance-monitor.example.json`](../examples/appliance-monitor.example.json) for
+authenticated array counts, numeric ratios, and a composite appliance card, and
 [`https-monitor.example.json`](../examples/https-monitor.example.json) for the
 public system-trust path,
 [`concurrent-monitors.example.json`](../examples/concurrent-monitors.example.json)
@@ -332,7 +347,7 @@ The host build does not include ESP-IDF, a cross-compiler, NimBLE transport, Wi-
 NVS, LittleFS, GPIO, or OTA support. MI packet construction is host-tested, but
 actual BLE behavior remains a hardware validation task. WinHTTP/Schannel HTTPS,
 system certificate trust, named desktop secrets, bounded HTTP methods, request
-headers and bodies, scalar JSON extraction, TCP connect, bounded TCP text exchange,
+headers and bodies, scalar/array-length/ratio JSON extraction, TCP connect, bounded TCP text exchange,
 ICMP echo, DNS address resolution, evaluation, concurrent interval execution, and display
 responsiveness are implemented and host-tested. Per-monitor custom CAs, certificate
 pins, and additional pull transports remain deferred. See

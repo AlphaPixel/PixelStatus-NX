@@ -1035,6 +1035,53 @@ struct ParsedSteps {
         }
         config.observation = HttpObservation::json_pointer;
         config.json_pointer = pointer.get<std::string>();
+    } else if (observe->contains("json_array_length")) {
+        const auto& pointer = (*observe)["json_array_length"];
+        if (!pointer.is_string()
+            || !valid_json_pointer(pointer.get_ref<const std::string&>())) {
+            add_error(result, std::string(path) + ".observe.json_array_length is invalid");
+            return std::nullopt;
+        }
+        config.observation = HttpObservation::json_array_length;
+        config.json_pointer = pointer.get<std::string>();
+    } else if (observe->contains("json_ratio")) {
+        const auto& ratio = (*observe)["json_ratio"];
+        const auto ratio_path = std::string(path) + ".observe.json_ratio";
+        if (!ratio.is_object()) {
+            add_error(result, ratio_path + " must be an object");
+            return std::nullopt;
+        }
+        reject_unknown_fields(
+            ratio, {"numerator", "denominator", "scale"}, ratio_path, result);
+        const auto numerator = ratio.find("numerator");
+        const auto denominator = ratio.find("denominator");
+        if (numerator == ratio.end() || !numerator->is_string()
+            || !valid_json_pointer(numerator->get_ref<const std::string&>())) {
+            add_error(result, ratio_path + ".numerator is invalid");
+            return std::nullopt;
+        }
+        if (denominator == ratio.end() || !denominator->is_string()
+            || !valid_json_pointer(denominator->get_ref<const std::string&>())) {
+            add_error(result, ratio_path + ".denominator is invalid");
+            return std::nullopt;
+        }
+        config.observation = HttpObservation::json_ratio;
+        config.json_pointer = numerator->get<std::string>();
+        config.json_denominator_pointer = denominator->get<std::string>();
+        if (const auto scale = ratio.find("scale"); scale != ratio.end()) {
+            if (!scale->is_number()) {
+                add_error(result, ratio_path + ".scale must be a number");
+                return std::nullopt;
+            }
+            const auto value = scale->get<double>();
+            if (!std::isfinite(value) || value <= 0.0 || value > 1'000'000'000.0) {
+                add_error(
+                    result,
+                    ratio_path + ".scale must be greater than zero and no more than 1000000000");
+                return std::nullopt;
+            }
+            config.json_scale = value;
+        }
     } else {
         add_error(result, std::string(path) + ".observe contains an unknown observation");
         return std::nullopt;

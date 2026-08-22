@@ -211,19 +211,37 @@ Exactly one observation is selected:
 {"status_code": true}
 {"body": true}
 {"json_pointer": "/path/to/scalar"}
+{"json_array_length": "/path/to/array"}
+{"json_ratio": {
+  "numerator": "/used_bytes",
+  "denominator": "/total_bytes",
+  "scale": 100
+}}
 ```
 
 HTTP status responses—including 4xx and 5xx—are successful transport observations.
 This lets a status-code rule classify a service response without confusing it with
-DNS, connection, timeout, or protocol failure. Invalid JSON and selected arrays or
-objects are `invalid_response` transport failures. A missing JSON Pointer produces
-a successful null observation so `exists` and `not_exists` rules can classify it.
+DNS, connection, timeout, or protocol failure. Invalid JSON, a non-scalar selected
+by `json_pointer`, and projection type errors are `invalid_response` transport
+failures. A missing JSON Pointer produces a successful null observation so `exists`
+and `not_exists` rules can classify it.
+
+`json_array_length` produces an integer and rejects a selected value that is not an
+array. `json_ratio` selects two finite JSON numbers, divides numerator by
+denominator, and applies an optional positive `scale` (default `1`, maximum one
+billion). It produces a floating-point value and rejects zero denominators,
+non-numeric values, and non-finite results. Any JSON Pointer may select the document
+root with an empty string; otherwise it must use RFC 6901 syntax. These deliberately
+small projections support alert counts and utilization percentages without adding
+vendor-specific logic to the portable monitor contract.
 
 Complete runnable shapes are in
 [`http-monitor.example.json`](../examples/http-monitor.example.json) and
 [`http-request.example.json`](../examples/http-request.example.json). A public
 system-trust check is in
-[`https-monitor.example.json`](../examples/https-monitor.example.json).
+[`https-monitor.example.json`](../examples/https-monitor.example.json). The
+authenticated array/ratio projections and matching composite display are exercised
+by [`appliance-monitor.example.json`](../examples/appliance-monitor.example.json).
 
 ### TCP Connect
 

@@ -14,6 +14,35 @@ class HealthHandler(BaseHTTPRequestHandler):
     slow_started = threading.Event()
 
     def do_GET(self) -> None:  # noqa: N802 - stdlib handler API
+        if self.path == "/appliance/truenas":
+            if self.headers.get("Authorization") != "Bearer fixture-truenas-token":
+                self.send_json({"error": "unauthorized"}, status=401)
+                return
+            self.send_json(
+                {
+                    "pools": [
+                        {
+                            "name": "tank",
+                            "status": "ONLINE",
+                            "used_bytes": 750,
+                            "total_bytes": 1000,
+                        }
+                    ],
+                    "alerts": [{"level": "WARNING"}],
+                }
+            )
+            return
+        if self.path == "/appliance/unifi":
+            if self.headers.get("X-API-Key") != "fixture-unifi-token":
+                self.send_json({"error": "unauthorized"}, status=401)
+                return
+            self.send_json(
+                {
+                    "state": "ONLINE",
+                    "wan": {"tx_bps": 300_000_000, "capacity_bps": 1_000_000_000},
+                }
+            )
+            return
         if self.path == "/slow":
             type(self).slow_started.set()
             time.sleep(type(self).slow_delay_seconds)
@@ -55,9 +84,9 @@ class HealthHandler(BaseHTTPRequestHandler):
         )
         self.send_json({"accepted": accepted})
 
-    def send_json(self, document: object) -> None:
+    def send_json(self, document: object, status: int = 200) -> None:
         payload = json.dumps(document, separators=(",", ":")).encode("utf-8")
-        self.send_response(200)
+        self.send_response(status)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(payload)))
         self.end_headers()

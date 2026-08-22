@@ -190,6 +190,29 @@
       ]
     },
     {
+      "name": "Simulator - Appliance Fixture",
+      "projectTarget": "pixelstatus_simulator.exe (Debug\\pixelstatus_simulator.exe)",
+      "program": "${cmake.binaryDir}/Debug/pixelstatus_simulator.exe",
+      "env": {
+        "PIXELSTATUS_SECRET_TRUENAS_API_KEY": "fixture-truenas-token",
+        "PIXELSTATUS_SECRET_UNIFI_API_KEY": "fixture-unifi-token"
+      },
+      "args": [
+        "${workspaceRoot}/examples/appliance-monitor.example.json",
+        "--no-window",
+        "--api-token",
+        "pixelstatus-vs-debug",
+        "--api-port",
+        "18937",
+        "--web-display-port",
+        "18938",
+        "--web-refresh-ms",
+        "33",
+        "--monitor-workers",
+        "4"
+      ]
+    },
+    {
       "name": "Simulator - Card Deck (Real Monitors)",
       "projectTarget": "pixelstatus_simulator.exe (Debug\\pixelstatus_simulator.exe)",
       "program": "${cmake.binaryDir}/Debug/pixelstatus_simulator.exe",

@@ -66,6 +66,24 @@ remains an explicit unknown placeholder until a management route or proxy become
 available. Addresses, hostnames, observations, and the test itself remain in
 Git-ignored local files.
 
+## Stage 4: Appliance Data Adapters
+
+Status: in progress on the Windows host as of 2026-08-21.
+
+The portable HTTP observation contract now includes a bounded JSON array-length
+projection and a scaled numeric ratio projection. Together with named secret
+headers, these cover simple active-alert counts and storage/WAN utilization without
+embedding TrueNAS or UniFi behavior in the renderer or monitor engine.
+
+[`appliance-monitor.example.json`](../examples/appliance-monitor.example.json) and
+`tools/test-appliance-monitor.ps1` exercise authenticated TrueNAS- and UniFi-shaped
+responses through five scheduled monitors, evaluation, the shared state store, a
+composite card, and the browser framebuffer API. This deterministic fixture stage
+is complete. Stage 4 remains open until ignored profiles have been matched to the
+installed TrueNAS `/api/docs/` and UniFi Integrations schemas and the real appliance
+values pass the same display assertions. Netgear model discovery and the Starlink
+gRPC sidecar follow those live validations.
+
 ## Stage 5: Windows Bluetooth Hardware Path
 
 The first Windows hardware pass uses Python and `bleak` as a diagnostic transport,
