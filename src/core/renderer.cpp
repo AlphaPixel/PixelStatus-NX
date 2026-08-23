@@ -223,6 +223,51 @@ bool render_status_grid(
     return true;
 }
 
+bool render_aggregate_status(
+    const StateStore& states,
+    const LayoutAggregateStatusConfig& aggregate,
+    TimePoint now,
+    RenderReport& report,
+    Frame& output) {
+    auto selected = aggregate.priority.size();
+    for (const auto& source : aggregate.sources) {
+        const auto resolved = states.resolve(source, now);
+        const auto status = resolved ? resolved->effective_status : std::string("unknown");
+        if (!resolved) {
+            ++report.missing_sources;
+        }
+        const auto found = std::find(
+            aggregate.priority.begin(), aggregate.priority.end(), status);
+        if (found == aggregate.priority.end()) {
+            continue;
+        }
+        selected = std::min(
+            selected,
+            static_cast<std::size_t>(found - aggregate.priority.begin()));
+    }
+
+    auto color = aggregate.default_color;
+    if (selected < aggregate.priority.size()) {
+        const auto found = aggregate.colors.find(aggregate.priority[selected]);
+        if (found == aggregate.colors.end()) {
+            report.error = "Aggregate status color became invalid during rendering";
+            return false;
+        }
+        color = found->second;
+    }
+    if (!output.fill_rect(
+            aggregate.x,
+            aggregate.y,
+            aggregate.width,
+            aggregate.height,
+            color)) {
+        report.error = "Aggregate status bounds became invalid during rendering";
+        return false;
+    }
+    ++report.rendered_indicators;
+    return true;
+}
+
 bool render_layout_bitmap(
     const LayoutBitmapConfig& bitmap,
     RenderReport& report,
@@ -380,6 +425,14 @@ RenderReport render_card(
                         animation_origin,
                         report,
                         output)) {
+                    return report;
+                }
+                continue;
+            }
+            if (const auto* aggregate =
+                    std::get_if<LayoutAggregateStatusConfig>(&widget)) {
+                if (!render_aggregate_status(
+                        states, *aggregate, now, report, output)) {
                     return report;
                 }
                 continue;

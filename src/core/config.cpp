@@ -1908,6 +1908,135 @@ struct LayoutBounds {
     return bitmap;
 }
 
+[[nodiscard]] std::optional<LayoutAggregateStatusConfig>
+parse_layout_aggregate_status_config(
+    const Json& item,
+    std::string_view path,
+    const DisplayConfig& display,
+    ConfigLoadResult& result,
+    const std::optional<LayoutBounds>& assigned) {
+    if (assigned) {
+        reject_unknown_fields(
+            item,
+            {"id", "type", "sources", "priority", "colors", "default_color",
+             "size", "weight"},
+            path,
+            result);
+    } else {
+        reject_unknown_fields(
+            item,
+            {"id", "type", "sources", "priority", "colors", "default_color",
+             "x", "y", "width", "height"},
+            path,
+            result);
+    }
+    const auto id = required_identifier(item, "id", path, result);
+    const auto bounds = parse_layout_bounds(item, path, display, result, assigned);
+    const auto sources_field = item.find("sources");
+    const auto priority_field = item.find("priority");
+    const auto colors_field = item.find("colors");
+    if (sources_field == item.end() || !sources_field->is_array()
+        || sources_field->empty() || sources_field->size() > maximum_layout_widgets) {
+        add_error(result, std::string(path) + ".sources must contain between 1 and 1024 identifiers");
+        return std::nullopt;
+    }
+    if (priority_field == item.end() || !priority_field->is_array()
+        || priority_field->empty() || priority_field->size() > maximum_statuses) {
+        add_error(result, std::string(path) + ".priority must contain between 1 and 256 status identifiers");
+        return std::nullopt;
+    }
+    if (colors_field == item.end() || !colors_field->is_object()
+        || colors_field->empty() || colors_field->size() > maximum_statuses) {
+        add_error(result, std::string(path) + ".colors must contain between 1 and 256 status colors");
+        return std::nullopt;
+    }
+    if (!id || !bounds || !layout_bounds_are_valid(*bounds, path, result)) {
+        return std::nullopt;
+    }
+
+    LayoutAggregateStatusConfig aggregate;
+    aggregate.id = *id;
+    aggregate.x = bounds->x;
+    aggregate.y = bounds->y;
+    aggregate.width = bounds->width;
+    aggregate.height = bounds->height;
+    aggregate.default_color = display.background;
+    bool valid = true;
+    std::unordered_set<std::string> sources;
+    for (std::size_t index = 0; index < sources_field->size(); ++index) {
+        const auto source_path = std::string(path) + ".sources[" + std::to_string(index) + "]";
+        if (!(*sources_field)[index].is_string()
+            || !is_valid_identifier((*sources_field)[index].get_ref<const std::string&>())) {
+            add_error(result, source_path + " must be a valid identifier");
+            valid = false;
+            continue;
+        }
+        auto source = (*sources_field)[index].get<std::string>();
+        if (!sources.insert(source).second) {
+            add_error(result, source_path + " duplicates an earlier aggregate source");
+            valid = false;
+            continue;
+        }
+        aggregate.sources.push_back(std::move(source));
+    }
+
+    std::unordered_set<std::string> priorities;
+    for (std::size_t index = 0; index < priority_field->size(); ++index) {
+        const auto priority_path = std::string(path) + ".priority[" + std::to_string(index) + "]";
+        if (!(*priority_field)[index].is_string()
+            || !is_valid_identifier((*priority_field)[index].get_ref<const std::string&>())) {
+            add_error(result, priority_path + " must be a valid status identifier");
+            valid = false;
+            continue;
+        }
+        auto status = (*priority_field)[index].get<std::string>();
+        if (!priorities.insert(status).second) {
+            add_error(result, priority_path + " duplicates an earlier aggregate priority");
+            valid = false;
+            continue;
+        }
+        aggregate.priority.push_back(std::move(status));
+    }
+
+    for (auto entry = colors_field->begin(); entry != colors_field->end(); ++entry) {
+        const auto color_path = std::string(path) + ".colors." + entry.key();
+        if (!is_valid_identifier(entry.key())) {
+            add_error(result, color_path + " name must be a valid status identifier");
+            valid = false;
+            continue;
+        }
+        if (!priorities.contains(entry.key())) {
+            add_error(result, color_path + " is not listed in .priority");
+            valid = false;
+            continue;
+        }
+        const auto color = color_value(entry.value(), color_path, result);
+        if (color) {
+            aggregate.colors.emplace(entry.key(), *color);
+        } else {
+            valid = false;
+        }
+    }
+    for (const auto& status : aggregate.priority) {
+        if (!aggregate.colors.contains(status)) {
+            add_error(result, std::string(path) + ".colors is missing priority status: " + status);
+            valid = false;
+        }
+    }
+    if (const auto field = item.find("default_color"); field != item.end()) {
+        const auto color = color_value(*field, std::string(path) + ".default_color", result);
+        if (color) {
+            aggregate.default_color = *color;
+        } else {
+            valid = false;
+        }
+    }
+    if (!valid) {
+        return std::nullopt;
+    }
+    return aggregate;
+}
+
 [[nodiscard]] std::optional<LayoutWidgetConfig> parse_layout_widget(
     const Json& item,
     std::string_view path,
@@ -1948,6 +2077,13 @@ struct LayoutBounds {
         }
         return std::nullopt;
     }
+    if (*type == "aggregate_status") {
+        if (auto aggregate = parse_layout_aggregate_status_config(
+                item, path, display, result, assigned)) {
+            return LayoutWidgetConfig{std::move(*aggregate)};
+        }
+        return std::nullopt;
+    }
     if (*type == "bitmap") {
         if (auto bitmap = parse_layout_bitmap_config(item, path, display, result, assigned)) {
             return LayoutWidgetConfig{std::move(*bitmap)};
@@ -1958,13 +2094,14 @@ struct LayoutBounds {
         item,
         {"id", "type", "source", "sources", "x", "y", "width", "height",
          "timezone", "color", "direction", "minimum", "maximum", "track_color",
-         "columns", "gap", "palette", "pixels", "size", "weight"},
+         "columns", "gap", "palette", "pixels", "priority", "colors",
+         "default_color", "size", "weight"},
         path,
         result);
     add_error(
         result,
         std::string(path)
-            + ".type must be indicator, clock, bar, status_grid, or bitmap");
+            + ".type must be indicator, clock, bar, status_grid, aggregate_status, or bitmap");
     return std::nullopt;
 }
 
@@ -1999,7 +2136,7 @@ struct LayoutParseState {
     if (!type) {
         return false;
     }
-    if (*type != "row" && *type != "column") {
+    if (*type != "row" && *type != "column" && *type != "stack") {
         auto widget = parse_layout_widget(item, path, display, result, bounds);
         if (!widget) {
             return false;
@@ -2014,13 +2151,47 @@ struct LayoutParseState {
         return true;
     }
 
-    reject_unknown_fields(
-        item, {"type", "gap", "children", "size", "weight"}, path, result);
+    if (*type == "stack") {
+        reject_unknown_fields(
+            item, {"type", "children", "size", "weight"}, path, result);
+    } else {
+        reject_unknown_fields(
+            item, {"type", "gap", "children", "size", "weight"}, path, result);
+    }
     const auto children = item.find("children");
     if (children == item.end() || !children->is_array() || children->empty()
         || children->size() > maximum_layout_widgets) {
         add_error(result, std::string(path) + ".children must contain between 1 and 1024 nodes");
         return false;
+    }
+    if (*type == "stack") {
+        bool valid = true;
+        for (std::size_t index = 0; index < children->size(); ++index) {
+            const auto& child = (*children)[index];
+            const auto child_path = std::string(path) + ".children[" + std::to_string(index) + "]";
+            if (!child.is_object()) {
+                add_error(result, child_path + " must be an object");
+                valid = false;
+                continue;
+            }
+            if (child.contains("size") || child.contains("weight")) {
+                add_error(result, child_path + " cannot specify size or weight inside a stack");
+                valid = false;
+                continue;
+            }
+            if (!parse_layout_node(
+                    child,
+                    child_path,
+                    display,
+                    bounds,
+                    depth + 1U,
+                    state,
+                    content,
+                    result)) {
+                valid = false;
+            }
+        }
+        return valid;
     }
     std::size_t gap{};
     if (item.contains("gap")) {
@@ -2701,6 +2872,21 @@ ConfigLoadResult load_config_file(const std::filesystem::path& path) {
                 } else if (const auto* layout_content =
                                std::get_if<LayoutCardConfig>(&card->content)) {
                     total_widgets += layout_content->widgets.size();
+                    for (const auto& widget : layout_content->widgets) {
+                        const auto* aggregate =
+                            std::get_if<LayoutAggregateStatusConfig>(&widget);
+                        if (aggregate == nullptr) {
+                            continue;
+                        }
+                        for (const auto& status : aggregate->priority) {
+                            if (!config.statuses.contains(status)) {
+                                add_error(
+                                    result,
+                                    path_text + " aggregate widget " + aggregate->id
+                                        + " references undefined status: " + status);
+                            }
+                        }
+                    }
                 }
                 if (total_widgets > maximum_layout_widgets) {
                     add_error(

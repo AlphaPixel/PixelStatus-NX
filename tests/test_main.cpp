@@ -513,6 +513,89 @@ void test_split_layout_widget_renderer() {
     CHECK(*frame.pixel(2U, 5U) == track && *frame.pixel(3U, 5U) == track);
 }
 
+void test_layered_aggregate_status_renderer() {
+    const auto origin = pixelstatus::TimePoint{};
+    pixelstatus::AppConfig config;
+    config.display = {4U, 4U, {1U, 2U, 3U}};
+    config.statuses.emplace(
+        "ok", pixelstatus::TimelineAppearance::solid({0U, 255U, 0U}));
+    config.statuses.emplace(
+        "unknown", pixelstatus::TimelineAppearance::solid({98U, 0U, 234U}));
+    config.statuses.emplace(
+        "stale", pixelstatus::TimelineAppearance::solid({255U, 145U, 0U}));
+
+    pixelstatus::LayoutCardConfig layout;
+    pixelstatus::LayoutAggregateStatusConfig aggregate;
+    aggregate.id = "overall";
+    aggregate.sources = {"service-a", "service-b", "missing"};
+    aggregate.priority = {"fail", "warn", "ok"};
+    aggregate.colors = {
+        {"fail", {56U, 5U, 15U}},
+        {"warn", {51U, 43U, 0U}},
+        {"ok", {0U, 0U, 0U}},
+    };
+    aggregate.width = 4U;
+    aggregate.height = 4U;
+    layout.widgets.emplace_back(std::move(aggregate));
+    layout.widgets.emplace_back(
+        pixelstatus::IndicatorConfig{"service-a", "service-a", 0U, 0U, 2U, 2U});
+
+    pixelstatus::CardConfig card;
+    card.id = "layered";
+    card.hold = 1s;
+    card.content = std::move(layout);
+    config.cards.push_back(std::move(card));
+
+    pixelstatus::StateStore states;
+    const auto set_state = [&states](
+                               std::string id,
+                               std::string status,
+                               pixelstatus::TimePoint time) {
+        pixelstatus::MonitorState state;
+        state.id = std::move(id);
+        state.status = std::move(status);
+        state.observed_at = time;
+        state.updated_at = time;
+        CHECK(states.upsert(std::move(state)));
+    };
+    set_state("service-a", "ok", origin);
+    set_state("service-b", "fail", origin);
+
+    pixelstatus::Frame frame(4U, 4U);
+    const pixelstatus::Renderer renderer(origin);
+    auto report = renderer.render(
+        states,
+        config,
+        origin,
+        std::chrono::system_clock::time_point{},
+        frame);
+    CHECK(report.success);
+    CHECK(report.rendered_indicators == 2U);
+    CHECK(report.missing_sources == 1U);
+    CHECK((*frame.pixel(0U, 0U) == pixelstatus::Rgb{0U, 255U, 0U}));
+    CHECK((*frame.pixel(3U, 3U) == pixelstatus::Rgb{56U, 5U, 15U}));
+
+    set_state("service-b", "warn", origin + 1ms);
+    report = renderer.render(
+        states,
+        config,
+        origin + 1ms,
+        std::chrono::system_clock::time_point{},
+        frame);
+    CHECK(report.success);
+    CHECK((*frame.pixel(3U, 3U) == pixelstatus::Rgb{51U, 43U, 0U}));
+
+    set_state("service-b", "ok", origin + 2ms);
+    report = renderer.render(
+        states,
+        config,
+        origin + 2ms,
+        std::chrono::system_clock::time_point{},
+        frame);
+    CHECK(report.success);
+    CHECK((*frame.pixel(3U, 3U) == pixelstatus::Rgb{0U, 0U, 0U}));
+}
+
 void test_mi_protocol_vectors() {
     const auto pixel_zero = pixelstatus::mi::build_pixel_packet(0, {255, 0, 0});
     const pixelstatus::mi::PixelPacket expected_zero{
@@ -663,6 +746,41 @@ void test_split_layout_configuration() {
     CHECK(primary && primary->x == 8U && primary->width == 2U);
     CHECK(secondary && secondary->x == 10U && secondary->width == 2U);
     CHECK(vps && vps->x == 12U && vps->width == 4U);
+    CHECK(clock && clock->x == 0U && clock->y == 9U);
+    CHECK(clock && clock->width == 16U && clock->height == 7U);
+}
+
+void test_layered_layout_configuration() {
+    const auto path = std::filesystem::path(PIXELSTATUS_TEST_DATA_DIR)
+        / "layered-layout.example.json";
+    const auto loaded = pixelstatus::load_config_file(path);
+    if (!loaded) {
+        for (const auto& error : loaded.errors) {
+            std::cerr << "layered layout config error: " << error << '\n';
+        }
+    }
+    CHECK(loaded);
+    if (!loaded.config || loaded.config->cards.empty()) {
+        return;
+    }
+    const auto* layout = std::get_if<pixelstatus::LayoutCardConfig>(
+        &loaded.config->cards.front().content);
+    CHECK(layout && layout->widgets.size() == 3U);
+    if (!layout || layout->widgets.size() != 3U) {
+        return;
+    }
+    const auto* aggregate =
+        std::get_if<pixelstatus::LayoutAggregateStatusConfig>(&layout->widgets[0]);
+    const auto* grid =
+        std::get_if<pixelstatus::LayoutStatusGridConfig>(&layout->widgets[1]);
+    const auto* clock =
+        std::get_if<pixelstatus::LayoutClockConfig>(&layout->widgets[2]);
+    CHECK(aggregate && aggregate->x == 0U && aggregate->y == 0U);
+    CHECK(aggregate && aggregate->width == 16U && aggregate->height == 16U);
+    CHECK(aggregate && aggregate->priority.front() == "fail");
+    CHECK(aggregate && aggregate->colors.at("ok") == pixelstatus::Rgb{});
+    CHECK(grid && grid->x == 0U && grid->y == 0U);
+    CHECK(grid && grid->width == 16U && grid->height == 8U);
     CHECK(clock && clock->x == 0U && clock->y == 9U);
     CHECK(clock && clock->width == 16U && clock->height == 7U);
 }
@@ -1705,6 +1823,41 @@ void test_configuration_rejects_invalid_split_layout() {
                         "gap": 1,
                         "sources": ["a", "b", "c", "d", "e", "f", "g", "h", "i"]
                     }
+                },
+                {
+                    "id": "bad-stack",
+                    "type": "layout",
+                    "hold": "1s",
+                    "root": {
+                        "type": "stack",
+                        "children": [
+                            {"id": "weighted", "type": "indicator", "source": "a", "weight": 1}
+                        ]
+                    }
+                },
+                {
+                    "id": "bad-aggregate",
+                    "type": "layout",
+                    "hold": "1s",
+                    "root": {
+                        "id": "overall",
+                        "type": "aggregate_status",
+                        "sources": ["a", "a"],
+                        "priority": ["fail", "fail", "ok"],
+                        "colors": {"fail": "#300000"}
+                    }
+                },
+                {
+                    "id": "undefined-aggregate-status",
+                    "type": "layout",
+                    "hold": "1s",
+                    "root": {
+                        "id": "overall-undefined",
+                        "type": "aggregate_status",
+                        "sources": ["a"],
+                        "priority": ["missing-status"],
+                        "colors": {"missing-status": "#300000"}
+                    }
                 }
             ]
         })";
@@ -1723,6 +1876,11 @@ void test_configuration_rejects_invalid_split_layout() {
     CHECK(errors_contain("at least one pixel"));
     CHECK(errors_contain("maximum must be greater"));
     CHECK(errors_contain("cannot fit its grid"));
+    CHECK(errors_contain("inside a stack"));
+    CHECK(errors_contain("duplicates an earlier aggregate source"));
+    CHECK(errors_contain("duplicates an earlier aggregate priority"));
+    CHECK(errors_contain("missing priority status"));
+    CHECK(errors_contain("references undefined status"));
 }
 
 #ifdef PIXELSTATUS_TEST_HOST_HTTP
@@ -2625,11 +2783,13 @@ int main() {
     test_clock_card_renderer();
     test_layout_card_renderer();
     test_split_layout_widget_renderer();
+    test_layered_aggregate_status_renderer();
     test_mi_protocol_vectors();
     test_sample_configuration();
     test_card_deck_configuration();
     test_layout_card_configuration();
     test_split_layout_configuration();
+    test_layered_layout_configuration();
     test_split_layout_rounding_and_bitmap_configuration();
     test_http_monitor_configuration();
     test_http_request_configuration();

@@ -18,6 +18,11 @@ Development begins with a portable C++20 core and a native Win32 display simulat
 This permits configuration, state, timing, appearance, layout, framebuffer, and
 output-driver behavior to be developed without ESP32 tools or hardware. See
 [Host-First Development](docs/host-development.md) for build and run instructions.
+The authoritative feature matrix, live-validation boundary, and consolidated
+backlog are in [Implementation Status and Loose Ends](docs/implementation-status.md).
+In the numbered design sections below, **should**, **may**, **possible**, and
+**eventually** describe intended architecture unless an implementation note or the
+status ledger says the feature is complete.
 The current host implementation also accepts authenticated status pushes over a
 loopback HTTP endpoint; its transport-independent handler is intended to be reused
 behind the eventual ESP32 HTTP server. The supported JSON appearance syntax is
@@ -45,13 +50,14 @@ The same rendered framebuffer is also available through a responsive
 headless host mode.
 The renderer can cycle bitmap, two-line local/UTC clock, live indicator, and
 composite cards through instant, fade, or four-direction slide transitions.
-Composite layouts support explicit AABBs or deterministic row/column splits plus
-status indicators, clocks, numeric utilization bars, status grids, and bounded
-bitmaps. See
+Composite layouts support explicit AABBs, deterministic row/column splits, and
+back-to-front stacks plus status indicators, aggregate-status backgrounds, clocks,
+numeric utilization bars, status grids, and bounded bitmaps. See
 [Card Decks](docs/card-decks.md) and the runnable
 [`card-deck.example.json`](examples/card-deck.example.json).
-The complete split-widget example is
-[`split-layout.example.json`](examples/split-layout.example.json).
+Complete split and layered examples are
+[`split-layout.example.json`](examples/split-layout.example.json) and
+[`layered-layout.example.json`](examples/layered-layout.example.json).
 Site-specific monitor inventories belong in the ignored
 `examples/operations.local.json` profile so LAN addresses, private hostnames, and
 operational notes cannot be staged accidentally.
@@ -59,6 +65,16 @@ The implemented WinHTTP/Schannel desktop TLS path, planned ESP32 TLS path, named
 secret handling, and integration requirements for TrueNAS CORE, UniFi, Netgear
 cable modems, and Starlink are described in
 [Appliance Monitoring and TLS](docs/appliance-monitoring.md).
+The Windows host can already query the official local UniFi Network API through a
+loopback-only, certificate-pinned collector documented in
+[UniFi Network Monitoring](docs/unifi-monitoring.md); its API key remains a named
+Windows Credential Manager secret.
+The same host-first boundary now includes a certificate-pinned, read-only OpenWrt
+collector for Wi-Fi bridge and Starlink router-path status, documented in
+[OpenWrt Starlink Bridge Monitoring](docs/openwrt-monitoring.md).
+For unattended use during development, a tested snapshot can be published outside
+the working tree and run at interactive user logon as described in
+[Windows Published Runtime and Task Scheduler](docs/windows-task-scheduler.md).
 The staged host-layout, live-data, Windows Bluetooth, and eventual ESP32 work is
 tracked in the [Development Roadmap](docs/development-roadmap.md).
 
@@ -203,10 +219,12 @@ The current development display is:
 - externally controlled;
 - connected over Bluetooth Low Energy using GATT writes.
 
-The working single-pixel protocol and candidate full-frame protocol are documented in
+The device-validated single-pixel and full-frame block protocols are documented in
 [MI LED Display Python Development Handoff](mi-led-display-python-handoff.md). The
-single-pixel path has been exercised on the user's display. Full-frame block mode,
-physical orientation, throughput, and several connection details still require
+live framebuffer bridge now drives the user's display through Windows/Bleak in both
+modes. See the runnable [Windows MI Bluetooth Bridge](docs/windows-mi-ble.md).
+Upper-left row-major RGB mapping, top-to-bottom two-row blocks, and browser/physical
+parity are confirmed. A forced interrupted transfer and longer soak still require
 device validation.
 
 The current device is an important target, but **must not define the core architecture**.
@@ -466,6 +484,10 @@ A small worker pool, perhaps 2–4 simultaneous network operations, is sufficien
 
 Support two scheduling styles.
 
+Implementation status: deterministic interval scheduling and a bounded one-to-eight
+worker Windows executor are complete. Jitter and cron-like schedules are planned,
+not accepted by Configuration V1.
+
 ## Interval Scheduling
 
 Preferred for normal health checks:
@@ -510,6 +532,11 @@ System time should be synchronized using SNTP/NTP.
 ---
 
 # 10. Initial Pull Monitor Types
+
+Implementation status: the current Windows runner types are `icmp_ping`, `dns`,
+`tcp_connect`, `tcp_exchange`, and `http` (including HTTPS). Their exact JSON
+contract is in [Configuration V1](docs/configuration-v1.md). Examples in this
+architectural section may describe richer future observations than the V1 schema.
 
 ## ICMP Ping
 
@@ -660,6 +687,11 @@ expect:
 
 JSON APIs deserve first-class handling.
 
+Implementation status: JSON is part of the implemented `http` monitor rather than
+a separate `http_json` type. V1 supports an RFC 6901 scalar pointer, selected-array
+length, or scaled ratio of two numeric pointers. The dotted/indexed notation below
+is illustrative design history and is not accepted by the current parser.
+
 Example:
 
 ```yaml
@@ -695,6 +727,10 @@ disks[0].percent_used
 
 TLS checking can be useful independently of HTTP.
 
+Implementation status: HTTPS transport with Schannel system trust and hostname
+validation is complete on Windows. A standalone TLS/certificate-expiry monitor is
+not implemented.
+
 Example:
 
 ```yaml
@@ -721,6 +757,9 @@ Possible checks:
 # 13. SNMP
 
 SNMP is practical on ESP32 and useful enough to warrant support.
+
+Implementation status: SNMP remains planned; neither the host schema nor a runner
+currently accepts it.
 
 Initial scope should be deliberately narrow:
 
@@ -817,6 +856,10 @@ PixelStatus NX need not understand how the state was derived.
 
 PixelStatus NX should expose an HTTP endpoint on the LAN.
 
+Implementation status: the bearer-authenticated V1 status API is implemented and
+host-tested on loopback, including TTL/stale behavior. It has not yet been ported to
+an ESP32 HTTP server. See [Configuration V1](docs/configuration-v1.md#host-status-input).
+
 For example:
 
 ```text
@@ -864,6 +907,8 @@ The ESP32 should generally **not** be exposed directly to the public Internet.
 # 17. MQTT Push Source
 
 MQTT is a strong candidate for remote push monitoring.
+
+Implementation status: MQTT remains planned and is not a current input type.
 
 The ESP32 makes an outbound connection to a broker and subscribes to configured topics.
 
@@ -1344,9 +1389,9 @@ These should be considered rendering features rather than monitor features.
 
 ---
 
-# 26. Potential Rendering Layers
+# 26. Rendering Layers
 
-A future renderer could use layers:
+Layout `stack` containers now provide deterministic back-to-front layers:
 
 ```text
 background
@@ -1360,7 +1405,12 @@ alerts
 global overlays
 ```
 
-This is not necessary for initial implementation, but the architecture should avoid making it impossible.
+Every child of a stack receives the same AABB. Its first child paints the background
+and each later child paints over the earlier result. The `aggregate_status` widget
+can supply an across-the-room card background selected from the worst effective
+status among multiple sources, while later grids, clocks, icons, or alerts preserve
+their individual colors. This is integer framebuffer composition without alpha
+blending, so behavior is identical on the desktop and ESP32 targets.
 
 ---
 
@@ -1528,6 +1578,9 @@ Push and pull sources both ultimately update this same structure.
 
 # 31. Configuration Storage
 
+Implementation status: the host loads one validated JSON configuration file. The
+NVS/LittleFS split described here is planned for ESP32 and has not been implemented.
+
 Configuration should be runtime editable.
 
 Suggested storage split:
@@ -1556,6 +1609,10 @@ Desktop tools or import utilities can translate YAML into JSON if desirable.
 # 32. Web Management Interface
 
 PixelStatus NX should eventually expose a local management interface, for example:
+
+Implementation status: the responsive read-only browser display and framebuffer
+API are complete. The configuration/dashboard management interface described in
+this section is not implemented.
 
 ```text
 http://pixelstatus-nx.local/
@@ -1611,6 +1668,10 @@ Configuration mutation endpoints can be added later.
 
 The API and internal state model should use the same status names.
 
+Implementation status: the four status GET/POST routes and read-only display route
+exist on the Windows host. `GET /api/v1/monitors` and configuration mutation routes
+do not.
+
 ---
 
 # 34. MI Bluetooth Display Driver
@@ -1627,6 +1688,11 @@ knowledge has different evidence levels and should not be treated uniformly.
   in the Python handoff rather than the conflicting upstream protocol note;
 - rewriting all 256 pixels through individual writes takes roughly five seconds on
   the current Windows host.
+- the Windows bridge discovered and connected to the expected FFD1 characteristic;
+- the characteristic advertised write-without-response with a reported 511-byte
+  maximum, and accepted one complete live PixelStatus frame through 256 pixel writes.
+- observed corner and block patterns confirmed upper-left row-major RGB mapping,
+  correct top-to-bottom block order, and browser/physical-frame parity.
 
 ## Derived From the Upstream Implementation
 
@@ -1641,14 +1707,15 @@ as device-validated only after the corresponding calibration and block tests pas
 
 ## Still To Validate
 
-- physical pixel ordering, origin, rotation, mirroring, and serpentine behavior;
-- RGB color ordering;
-- negotiated ATT MTU and reliable maximum write size;
-- write-with-response versus write-without-response behavior;
-- stable block delay and maximum practical frame rate;
+- forced disconnect during a block transfer and newest-frame restoration;
+- longer unattended write/reconnect/task-restart soak behavior;
+- write-without-response stability; the observed characteristic did not advertise
+  write-with-response;
+- stable block delay and maximum practical rate beyond the observed roughly 4 Hz
+  visible panel update rate;
 - whether graffiti and block modes can be switched or interleaved safely;
 - brightness commands, if supported;
-- disconnect, reconnect, and current-frame restoration behavior.
+- an evidence-based automatic sparse/block crossover, if mode switching proves safe.
 
 The firmware driver should contain three focused parts:
 
@@ -1938,6 +2005,11 @@ configuration validation behavior, output-driver ownership/backpressure contract
 and byte-level MI protocol test vectors. It does not require network monitors or
 physical display access.
 
+Status: complete on the Windows/portable-core path and substantially exceeded. The
+repository also has real pull monitors, browser output, composite card decks,
+vendor adapters, and a physically validated Windows MI bridge. ESP32 work remains
+separate; see the [current status ledger](docs/implementation-status.md).
+
 After host rendering and layout are verified, validate the MI display from Windows
 with the Python/`bleak` reference transport. The later ESP32 stage replaces that
 diagnostic transport with native NimBLE while keeping the same framebuffer and
@@ -2126,7 +2198,11 @@ This separation is what allows PixelStatus NX to evolve beyond both its current 
 
 # 47. Initial Implementation Approval Plan
 
-Implementation should proceed through the following approval gates.
+This section is the original approval sequence. Gates 1–4 were adapted to honor the
+later host-first decision: no ESP-IDF toolchain is required until the Windows
+behavior is mature. Current stage status and remaining exit gates are maintained in
+the [Development Roadmap](docs/development-roadmap.md), with the exhaustive backlog
+in [Implementation Status and Loose Ends](docs/implementation-status.md).
 
 ## Gate 1: Contracts and Repository Skeleton
 
@@ -2137,6 +2213,10 @@ Implementation should proceed through the following approval gates.
 - add host-runnable tests for pure core logic and MI packet vectors.
 
 Deliverable: a building skeleton with tests, but no networking or hardware access.
+
+Status: complete for the portable C++20/Windows skeleton, schema, core contracts,
+tests, and MI packet vectors. Creating and pinning the ESP-IDF project was
+deliberately moved to the production-port stage.
 
 ## Gate 2: Simulator Vertical Slice
 
@@ -2162,6 +2242,13 @@ Deliverable: the same simulator-rendered frames displayed on the physical MI mat
 from Windows. A native C++/WinRT transport is optional; the production ESP32 NimBLE
 transport remains a later stage.
 
+Status: the conservative pixel-mode deliverable, orientation/color calibration, and
+repeated visually correct block-mode operation are physically validated. The bridge
+now coalesces frames, reconnects with bounded backoff, performs full restoration,
+and emits an atomic write heartbeat used by the Scheduled Task status check. A
+forced mid-transfer disconnect, longer soak, and same-connection mode switching
+remain before automatic mode selection or closure of the reliability gate.
+
 ## Gate 4: First External State Input
 
 - add the authenticated local HTTP status endpoint;
@@ -2171,8 +2258,8 @@ transport remains a later stage.
 Deliverable: an end-to-end ambient status appliance with one push interface.
 
 Status: the hardware-independent portion is complete and host-tested. The portable
-authenticated handler updates the simulator through localhost HTTP. Confirming the
-same path through the MI output remains part of Gate 3 hardware validation.
+authenticated handler updates the simulator through localhost HTTP, and the shared
+resulting framebuffer has been mirrored to the physical MI output.
 
 ## Later V1 Gates
 

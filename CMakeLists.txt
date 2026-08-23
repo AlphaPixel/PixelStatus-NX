@@ -201,4 +201,37 @@ if(PIXELSTATUS_BUILD_TESTS)
     endif()
 
     add_test(NAME pixelstatus_tests COMMAND pixelstatus_tests)
+
+    if(PIXELSTATUS_BUILD_HOST_HTTP)
+        find_package(Python3 3.10 COMPONENTS Interpreter QUIET)
+        if(Python3_Interpreter_FOUND)
+            add_test(
+                NAME pixelstatus_mi_ble_python_tests
+                COMMAND ${Python3_EXECUTABLE} -m unittest discover
+                    -s tests -p test_mi_ble.py -v
+            )
+            set_tests_properties(
+                pixelstatus_mi_ble_python_tests
+                PROPERTIES WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+            )
+            add_test(
+                NAME pixelstatus_unifi_python_tests
+                COMMAND ${Python3_EXECUTABLE} -m unittest discover
+                    -s tests -p test_unifi.py -v
+            )
+            set_tests_properties(
+                pixelstatus_unifi_python_tests
+                PROPERTIES WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+            )
+            add_test(
+                NAME pixelstatus_openwrt_python_tests
+                COMMAND ${Python3_EXECUTABLE} -m unittest discover
+                    -s tests -p test_openwrt.py -v
+            )
+            set_tests_properties(
+                pixelstatus_openwrt_python_tests
+                PROPERTIES WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+            )
+        endif()
+    endif()
 endif()

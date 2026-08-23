@@ -104,6 +104,18 @@ struct LayoutStatusGridConfig {
     std::size_t gap{};
 };
 
+struct LayoutAggregateStatusConfig {
+    std::string id;
+    std::vector<std::string> sources;
+    std::vector<std::string> priority;
+    std::unordered_map<std::string, Rgb> colors;
+    std::size_t x{};
+    std::size_t y{};
+    std::size_t width{1};
+    std::size_t height{1};
+    Rgb default_color{};
+};
+
 struct LayoutBitmapConfig {
     std::string id;
     std::size_t x{};
@@ -119,6 +131,7 @@ using LayoutWidgetConfig = std::variant<
     LayoutClockConfig,
     LayoutBarConfig,
     LayoutStatusGridConfig,
+    LayoutAggregateStatusConfig,
     LayoutBitmapConfig>;
 
 struct LayoutCardConfig {

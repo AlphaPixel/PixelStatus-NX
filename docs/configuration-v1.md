@@ -2,6 +2,10 @@
 
 The canonical machine-readable contract is
 [`pixelstatus-config-v1.schema.json`](../schemas/pixelstatus-config-v1.schema.json).
+Everything described as accepted syntax in this document is implemented by the
+current host parser; firmware consumption of the same contract is still planned.
+See [Implementation Status and Loose Ends](implementation-status.md) for the target
+and validation boundary.
 The runtime parser additionally checks total display size, indicator bounds,
 duplicate indicator IDs, aggregate appearance durations, and cross-field constraints
 such as the TCP-exchange response limit relative to its delimiter.
@@ -31,8 +35,12 @@ changing the transport contract.
 The root must contain exactly one presentation form: `indicators` for a permanent
 layout, or `cards` for a timed deck. Cards may contain a palette bitmap, a two-line
 local/UTC clock, their own indicator layout, or a composite layout. Composite
-layouts accept either explicit AABB widgets or a recursive row/column split tree;
-both resolve to the same portable widget representation.
+layouts accept either explicit AABB widgets or a recursive layout tree. `row` and
+`column` nodes split an AABB, while `stack` gives each child the same AABB and paints
+them back-to-front. All forms resolve to the same portable ordered-widget
+representation. An `aggregate_status` widget can select a worst-priority status
+across multiple sources and paint a subdued overall-health layer beneath brighter
+individual widgets.
 See [Card Decks](card-decks.md) for the complete card and transition grammar.
 
 Durations are integer strings using `ms`, `s`, `m`, or `h`, such as `250ms`, `2s`,
@@ -424,7 +432,7 @@ The complete runnable shape is in
 
 ## Host Status Input
 
-The current host endpoint accepts:
+The current bearer-authenticated host endpoint accepts:
 
 ```text
 GET  /api/v1/status
@@ -451,3 +459,6 @@ the complete state for that ID and resets its observation and update timestamps.
 The animation epoch changes when the effective status changes, including when a
 push refreshes a stale state. A GET returns both `reported_status` and the effective
 `status`, which becomes `stale` once its TTL has elapsed.
+
+The simulator binds this mutation API to loopback by default. It is distinct from
+the read-only browser-display server and is not yet implemented as ESP32 firmware.

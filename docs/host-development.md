@@ -7,6 +7,10 @@ toolchain or device is introduced.
 The current host target is 64-bit Windows using Visual Studio 2022 and CMake. The
 simulator uses Win32 GDI and has no runtime graphics dependency.
 
+The host feature set is mature enough to run the real monitoring deck and MI panel
+from an immutable per-user Scheduled Task. The complete implemented/planned split is
+maintained in [Implementation Status and Loose Ends](implementation-status.md).
+
 ## Build
 
 From a PowerShell prompt in the repository root:
@@ -140,6 +144,14 @@ framebuffer API:
 .\tools\test-split-layout.ps1
 ```
 
+The layered-layout smoke test verifies stack paint order and pushes healthy,
+warning, and failure states while checking the black, dull-yellow, and dull-red
+aggregate backgrounds beneath bright foreground cells:
+
+```powershell
+.\tools\test-layered-layout.ps1
+```
+
 The appliance smoke test starts the authenticated fixture and simulator, verifies
 five TrueNAS/UniFi-shaped monitor states, then checks their grid, bars, indicator,
 and UTC clock through the browser framebuffer API:
@@ -155,8 +167,35 @@ Site-specific monitoring can be exercised with the ignored
 .\tools\test-operations.local.ps1
 ```
 
-Both paths are intentionally excluded from Git. Keep LAN addresses, private
-hostnames, credentials, and environment-specific assertions in those local files.
+For an indefinite browser-plus-MI-panel session using that private profile:
+
+```powershell
+.\tools\run-operations-demo.ps1
+```
+
+It serves `http://127.0.0.1:18908/` and runs until Ctrl+C. Add `-BrowserOnly` when
+the Bluetooth panel is unavailable.
+
+The private profile, its local notes, and its site-specific regression test are
+intentionally excluded from Git. The generic launcher is tracked, but contains no
+LAN addresses, hostnames, credentials, or hardware identifiers.
+
+To keep a verified version running while the working tree continues to change,
+publish it beneath `%LOCALAPPDATA%` and register the interactive logon task described
+in [`windows-task-scheduler.md`](windows-task-scheduler.md). The task runs an
+immutable release copy rather than the build tree, so it does not lock the
+simulator being rebuilt or consume partially edited Python modules.
+
+For an official local UniFi API connection with a named Windows credential and an
+explicit certificate pin, run the loopback collector documented in
+[`unifi-monitoring.md`](unifi-monitoring.md). Its sanitized `/health` document is a
+normal PixelStatus HTTP monitor source; the API key is never placed in the display
+configuration.
+
+The companion [`openwrt-monitoring.md`](openwrt-monitoring.md) collector exposes
+separate sanitized bridge and Starlink router-path statuses on loopback port 18951.
+It reads a restricted rpcd password from Credential Manager and checks the bridge's
+leaf-certificate pin before sending that password.
 
 The browser-display smoke test runs the renderer headlessly and verifies its HTML,
 manifest, and current-frame API:
@@ -315,7 +354,8 @@ suitable application service.
 The simulator supports:
 
 - fixed layouts or timed decks of bitmap, clock, indicator, and composite cards;
-- deterministic row/column splits with bars, status grids, and bounded bitmaps;
+- deterministic row/column splits and back-to-front stacks with aggregate-status
+  backgrounds, bars, status grids, and bounded bitmaps;
 - instant, fade, and four-direction slide transitions between cards;
 - solid, blink, toggle, fade, pulse, sequence, and color-cycle appearances;
 - a periodic status transition;
@@ -328,9 +368,10 @@ The simulator supports:
 
 The renderer knows only the `OutputDriver` contract. The Win32 and HTTP display
 drivers independently copy and coalesce submitted logical frames in the same way
-that a slow BLE driver may need to do. A future SDL, direct-LED, or MI BLE
-implementation can replace either driver without changing state, appearance,
-layout, or renderer code.
+that a slow BLE driver must do. The implemented Python/Bleak bridge consumes the
+HTTP driver's frame API; a future SDL, direct-LED, ESP32 NimBLE, or optional native
+C++/WinRT implementation can use the same framebuffer without changing state,
+appearance, layout, or renderer code.
 
 The HTTP transport is similarly thin: it translates native HTTP requests into the
 portable `StatusApi` request/response contract. The validation and state-update
@@ -344,12 +385,36 @@ scheduling.
 ## Deliberately Deferred
 
 The host build does not include ESP-IDF, a cross-compiler, NimBLE transport, Wi-Fi,
-NVS, LittleFS, GPIO, or OTA support. MI packet construction is host-tested, but
-actual BLE behavior remains a hardware validation task. WinHTTP/Schannel HTTPS,
+NVS, LittleFS, GPIO, or OTA support. MI packet construction is host-tested and the
+Windows/Bleak pixel and block paths have delivered live framebuffers to the physical
+display with confirmed orientation and color. A forced mid-transfer disconnect,
+longer soak, and same-connection mode switching remain hardware-validation tasks.
+WinHTTP/Schannel HTTPS,
 system certificate trust, named desktop secrets, bounded HTTP methods, request
 headers and bodies, scalar/array-length/ratio JSON extraction, TCP connect, bounded TCP text exchange,
 ICMP echo, DNS address resolution, evaluation, concurrent interval execution, and display
-responsiveness are implemented and host-tested. Per-monitor custom CAs, certificate
-pins, and additional pull transports remain deferred. See
+responsiveness are implemented and host-tested. Generic per-monitor custom CAs,
+certificate pins, cron/jitter, and additional pull transports remain deferred; the
+UniFi/OpenWrt sidecars already implement their own pre-auth leaf pins. See
 [Appliance Monitoring and TLS](appliance-monitoring.md) for the selected Win32 and
 ESP32 TLS paths and appliance-integration requirements.
+
+## Windows MI Bluetooth Output
+
+The Python/Bleak bridge mirrors the same browser-display framebuffer to the real
+16×16 MI matrix without changing the simulator or renderer:
+
+```powershell
+python -m tools.mi_ble scan
+python -m tools.mi_ble probe
+.\tools\start-mi-bridge.ps1 `
+    -DisplayUrl 'http://127.0.0.1:8788/api/v1/display'
+```
+
+The device-validated `pixel` path is the conservative default. Full-frame `block`
+mode is also device-validated and is explicitly selected by the live operations
+profile; no automatic crossover exists. The bridge can atomically publish a
+privacy-preserving status heartbeat, which the Scheduled Task runtime uses for
+health inspection. Setup, one-frame testing, transforms, failure behavior, and
+current device evidence are in
+[Windows MI Bluetooth Bridge](windows-mi-ble.md).

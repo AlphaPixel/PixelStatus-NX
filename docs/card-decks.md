@@ -5,6 +5,12 @@ the monitor engine continues updating every source in the background. The same
 rendered frames go to the Win32, browser, and eventual hardware drivers; a backend
 does not need to understand cards or transitions.
 
+All card, transition, split, stack, and widget forms documented here are implemented
+and covered by host tests. The physical MI profile may choose instant transitions
+because that panel visibly refreshes at about 4 Hz; animated transitions remain
+available to the browser, Win32 window, and faster future outputs. Current project
+status is summarized in [Implementation Status and Loose Ends](implementation-status.md).
+
 Use exactly one of the top-level `indicators` or `cards` arrays. A deck contains
 1–32 cards. Every card requires a unique `id`, a `type`, and a `hold` duration.
 The optional `transition` belongs to the outgoing card and leads to the next card,
@@ -122,9 +128,9 @@ for local time and yellow for UTC. Widget IDs are unique within their card.
 [`layout-card.example.json`](../examples/layout-card.example.json) is a runnable
 16×16 explicit composite example.
 
-### Split trees
+### Layout trees
 
-A split tree uses `row` containers for left-to-right allocation and `column`
+A layout tree uses `row` containers for left-to-right allocation and `column`
 containers for top-to-bottom allocation. A container may set a non-negative `gap`.
 Each child chooses either a fixed pixel `size` along the parent axis or a positive
 `weight`; omitting both means `weight: 1`. Fixed children and gaps are removed first,
@@ -162,6 +168,39 @@ The parser flattens this tree into the same explicit AABBs before returning the
 configuration. The renderer and every output backend remain unaware of split trees.
 Nesting is limited to 16 levels, 2,048 total nodes, and 1,024 resolved widgets.
 
+A `stack` container instead gives every child the same bounds. Children flatten in
+array order and paint back-to-front: the first child is the bottom layer, and the
+last is the top layer. Direct children of a stack cannot specify `size` or `weight`
+because a stack performs no spatial allocation. Row and column containers can be
+nested within a stack to place foreground widgets over a shared background.
+
+```json
+{
+  "type": "stack",
+  "children": [
+    {
+      "id": "overall",
+      "type": "aggregate_status",
+      "sources": ["router", "nas", "wan"],
+      "priority": ["fail", "stale", "warn", "ok"],
+      "colors": {
+        "fail": "#38050F",
+        "stale": "#332000",
+        "warn": "#332B00",
+        "ok": "#000000"
+      }
+    },
+    {
+      "id": "nodes",
+      "type": "status_grid",
+      "sources": ["router", "nas", "wan"],
+      "columns": 3,
+      "gap": 1
+    }
+  ]
+}
+```
+
 ### Layout widgets
 
 - `indicator` fills its complete bounds with the source's effective status
@@ -176,14 +215,25 @@ Nesting is limited to 16 levels, 2,048 total nodes, and 1,024 resolved widgets.
 - `status_grid` paints its `sources` row-major across the required `columns`. Its
   optional `gap` defaults to zero. Uneven cell pixels are distributed
   deterministically, and unused cells in the last row retain the background.
+- `aggregate_status` selects the first effective source status found in its
+  worst-first `priority` list and fills its complete bounds with that entry from
+  `colors`. Every priority entry must name a top-level configured status. Statuses
+  omitted from `priority` do not affect the result. Missing
+  sources act as `unknown`; omitting `unknown` is therefore useful when an
+  intentionally unconfigured placeholder should not change overall card health.
+  `default_color` defaults to the display background and is used when no source
+  status participates. `colors` must contain exactly one entry for every status in
+  `priority`; extra color entries are rejected.
 - `bitmap` maps palette characters to pixels exactly within its resolved bounds;
   rows and columns must match those bounds. It does not scale artwork.
 
-All five widgets are accepted in explicit `widgets`; split-tree leaves use the same
+All six widgets are accepted in explicit `widgets`; layout-tree leaves use the same
 fields but replace coordinates with optional `size` or `weight`.
 
 [`split-layout.example.json`](../examples/split-layout.example.json) is the complete
 16×16 storage-bar, drive-grid, dual-WAN, VPS-grid, and UTC-clock example.
+[`layered-layout.example.json`](../examples/layered-layout.example.json) demonstrates
+a dim worst-status background under a bright service grid and UTC clock.
 
 ## Real-Monitor Starter Deck
 

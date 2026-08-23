@@ -5,6 +5,10 @@ frame and serves it to a browser. It consumes exactly the same `Frame` produced 
 the Win32 simulator and future physical drivers; monitor, state, appearance, layout,
 and rendering code do not know that a browser is attached.
 
+This backend is implemented, host-tested, and used by both live browser viewing and
+the Windows MI bridge. It is a production-useful desktop output, not a configuration
+management UI. See [Implementation Status and Loose Ends](implementation-status.md).
+
 The simulator starts this backend by default on loopback port 8788:
 
 ```powershell
@@ -30,7 +34,9 @@ The relevant command-line options are:
 
 At least one display backend must remain enabled. Binding to `0.0.0.0` makes the
 read-only display visible on every available interface; the current display server
-does not authenticate viewers, so loopback remains the safe default.
+does not authenticate viewers or provide TLS, so loopback remains the safe default.
+For permanent remote access, put it behind an authenticated TLS reverse proxy or add
+equivalent server support; do not treat a temporary port-forward as secure.
 
 ## Frame API
 
@@ -93,3 +99,6 @@ frame through the HTTP API:
 ```powershell
 .\tools\test-web-display.ps1
 ```
+
+The private operations runtime serves the same backend on loopback port 18908 and
+its Scheduled Task status check verifies that the sequence continues advancing.

@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "display": {
+    "width": 16,
+    "height": 16,
+    "background": "#000000"
+  },
+  "statuses": {
+    "ok": {"appearance": {"solid": "#00C853"}},
+    "warn": {"appearance": {"solid": "#FFD600"}},
+    "fail": {"appearance": {"solid": "#FF1744"}},
+    "communication_failure": {
+      "appearance": {"blink": {"color": "#FF00FF", "on": "500ms", "off": "500ms"}}
+    },
+    "stale": {"appearance": {"solid": "#FF9100"}},
+    "unknown": {"appearance": {"solid": "#6200EA"}}
+  },
+  "cards": [
+    {
+      "id": "layered-services",
+      "type": "layout",
+      "hold": "1h",
+      "root": {
+        "type": "stack",
+        "children": [
+          {
+            "id": "overall",
+            "type": "aggregate_status",
+            "sources": ["service-a", "service-b", "service-c", "service-d"],
+            "priority": ["fail", "communication_failure", "stale", "warn", "ok"],
+            "colors": {
+              "fail": "#38050F",
+              "communication_failure": "#38050F",
+              "stale": "#332000",
+              "warn": "#332B00",
+              "ok": "#000000"
+            },
+            "default_color": "#000000"
+          },
+          {
+            "type": "column",
+            "gap": 1,
+            "children": [
+              {
+                "id": "services",
+                "type": "status_grid",
+                "columns": 4,
+                "gap": 1,
+                "weight": 1,
+                "sources": ["service-a", "service-b", "service-c", "service-d"]
+              },
+              {
+                "id": "utc",
+                "type": "clock",
+                "timezone": "utc",
+                "color": "#FFFFFF",
+                "size": 7
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

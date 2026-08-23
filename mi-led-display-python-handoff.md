@@ -1,6 +1,6 @@
 # MI LED Display Python Development Handoff
 
-Date: 2026-08-17
+Created: 2026-08-17; implementation status reconciled 2026-08-22
 
 Project context: Python control of a Merkury / MI 16x16 Bluetooth LED matrix display from a Microsoft Surface Book 3 running Windows, based on the reverse-engineered `offe/mi-led-display` repository.
 
@@ -12,6 +12,13 @@ This document is the hardware workbench and protocol evidence record for the MI
 display. The Python code is intended for discovery, calibration, benchmarking, and
 generation of protocol test vectors. PixelStatus NX production firmware will not run
 Python or `bleak`; it will use a native ESP-IDF NimBLE output driver.
+
+For current commands and operational behavior, use
+[`docs/windows-mi-ble.md`](docs/windows-mi-ble.md). For the project-wide completion
+boundary and remaining reliability work, use
+[`docs/implementation-status.md`](docs/implementation-status.md). Standalone scripts
+below are retained as protocol-development history; `tools/mi_ble` is the maintained
+implementation.
 
 Protocol claims use these evidence levels:
 
@@ -51,6 +58,39 @@ python -m pip install bleak pillow
 ```
 
 The official repo README may mention `pil`; use `pillow` instead. The import remains `from PIL import Image`.
+
+### PixelStatus NX bridge status
+
+The repository now contains the host reference package at `tools/mi_ble`, the
+`python -m tools.mi_ble` command, and `tools/start-mi-bridge.ps1`. It reads the
+existing browser-display frame API, validates an exact 16×16 `rgb888` frame, and
+forwards it without coupling BLE behavior to the renderer.
+
+The 2026-08-21 device session established:
+
+- Windows/Bleak discovery and connection to the advertised `MI Matrix Display`;
+- the expected FFD1 characteristic was present;
+- it advertised `write-without-response`, but not `write`;
+- Bleak reported a 511-byte maximum write-without-response size;
+- one complete live PixelStatus frame was accepted through the device-validated
+  graffiti initializer and 256 single-pixel writes;
+- the block initializer and eight 100-byte packets for the same live frame completed
+  without a GATT error at a 10 ms inter-block delay.
+
+User-observed calibration on 2026-08-22 additionally confirmed:
+
+- pixel zero is the upper-left corner;
+- logical rows are row-major without rotation or mirroring;
+- the device consumes RGB channel order as encoded;
+- block numbers 1 through 8 map to contiguous two-row horizontal bands from top to
+  bottom;
+- the block-mode live frame visually matched the browser backend;
+- returning to graffiti mode on a fresh connection restored the same live frame and
+  continued sparse clock updates.
+
+The BLE address is deliberately not recorded because it is a local runtime identity.
+Sustained block pacing, same-connection mode switching, and an interrupted-transfer
+reconnect remain calibration work rather than completed claims.
 
 ## 2. BLE workflow
 
@@ -275,9 +315,10 @@ There is no known hardware sprite mode, dirty rectangle mode, palette mode, fram
 
 ## 6. Candidate full-screen block-mode test
 
-The packet structure in this test is **upstream-derived**. The script is ready to use
-for validation, but block-mode behavior is not device-validated until the experiments
-in section 9 have been run without corruption.
+The packet structure began as **upstream-derived**, but the initializer, eight
+100-byte packets, two-row block ordering, and visual output are now
+**device-validated**. This standalone script is retained as the original experiment;
+prefer `python -m tools.mi_ble pattern blocks --mode block` or the live bridge.
 
 Save as `flash_fullscreen.py`.
 
@@ -289,10 +330,10 @@ from bleak import BleakScanner, BleakClient
 TARGET_NAME = "MI Matrix Display"
 CHARACTERISTIC_UUID = "0000ffd1-0000-1000-8000-00805f9b34fb"
 
-# Fastest mode to try first.
-# If frames corrupt or drop, set USE_RESPONSE=True or add BLOCK_DELAY.
+# The observed characteristic supports writes without response only.
+# If frames corrupt or drop, increase BLOCK_DELAY.
 USE_RESPONSE = False
-BLOCK_DELAY = 0.0
+BLOCK_DELAY = 0.005
 
 # Safety limit. Set to None to run forever.
 RUN_SECONDS = 30
@@ -758,63 +799,36 @@ A MicroPython proof of concept is technically possible because MicroPython expos
 BLE central and GATT-client operations. It is not the selected production path and
 would still require a new transport implementation rather than running `bleak`.
 
-## 9. Next experiments
+## 9. Completed and Remaining Experiments
 
-1. Run `flash_fullscreen.py` with:
+Completed:
 
-```python
-USE_RESPONSE = False
-BLOCK_DELAY = 0.0
-```
+- the maintained `tools/mi_ble` package consumes exact PixelStatus browser frames,
+  validates transforms, constructs fixed pixel/block packet vectors, and has pure
+  tests;
+- the physical characteristic was inspected and advertised no-response writes with
+  a reported 511-byte maximum;
+- pixel mode, eight-packet block mode, upper-left row-major RGB geometry, no
+  rotation/mirroring, and top-to-bottom two-row block order were visually confirmed;
+- pixel diffing, newest-frame coalescing, bounded reconnect, complete restoration on
+  connection, and an atomic privacy-preserving heartbeat are implemented;
+- PixelStatus's C++ appearance grammar and renderer already produce the animated
+  framebuffer; the BLE layer intentionally does not reimplement status visuals.
 
-Record:
+Remaining:
 
-- printed full frames/sec
-- visual corruption yes/no
-- whether brightness visibly toggles cleanly
-- negotiated MTU or maximum accepted characteristic-write size, if observable
-
-2. If corrupt, test:
-
-```python
-USE_RESPONSE = True
-BLOCK_DELAY = 0.0
-```
-
-3. If still corrupt or unstable, test:
-
-```python
-USE_RESPONSE = False
-BLOCK_DELAY = 0.001
-```
-
-4. Run coordinate-corner, index-walk, and per-block color calibration. Record origin,
-   rotation, mirroring, pixel order, and color order.
-
-5. Test transitions between graffiti and block modes. Determine whether each change
-   requires reinitialization and whether mode switching preserves untouched pixels.
-
-6. Disconnect and reconnect during a frame update. Verify that a complete current
-   frame can be restored after reconnection.
-
-7. Create a small host reference package and convert examples to use it.
-
-8. Generate fixed packet test vectors for the native ESP-IDF implementation.
-
-9. Implement framebuffer diffing. Enable automatic sparse/block selection only after
-   the mode-switching and throughput results establish a safe crossover threshold.
-
-10. Implement a status-display grammar for PixelStatus NX-style patterns:
-
-```text
-solid(color)
-blink(color_a, color_b, period_ms, duty_cycle)
-fade(color_a, color_b, period_ms)
-pulse(color, period_ms)
-toggle(sequence, period_ms)
-```
-
-The grammar should output either sparse pixel changes or full framebuffer blocks depending on how many pixels change per frame.
+1. Force a disconnect during an active block transfer and verify that reconnect
+   restores the newest complete source frame.
+2. Run a longer unattended soak and record stability, GATT writes, reconnects,
+   task restarts, and the useful visible update ceiling. The current panel appears
+   to refresh at about 4 Hz.
+3. Test graffiti/block switching on one connection and whether reinitialization
+   preserves or replaces untouched pixels.
+4. Enable automatic sparse/block selection only if the switching result and measured
+   crossover justify it. Until then, mode is explicit for each run.
+5. Test brightness commands only if controlling brightness becomes a requirement.
+6. Reuse the validated packet vectors when the native ESP-IDF NimBLE component is
+   created; no ESP32 transport exists yet.
 
 ## 10. Strategic design note for PixelStatus NX
 

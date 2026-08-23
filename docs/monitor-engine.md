@@ -16,6 +16,11 @@ types, or wall-clock dependencies. Tests drive it with explicit steady-clock tim
 points and scripted runners, so scheduling and status transitions are deterministic
 on the desktop. Concrete transports remain separate runner adapters.
 
+The contracts and Windows adapters described before **Deliberately Deferred** are
+implemented and host-tested. The ESP32 runner/executor layer is not started. See
+[Implementation Status and Loose Ends](implementation-status.md) for the complete
+capability matrix and prioritized backlog.
+
 ## Runner Contract
 
 Each concrete runner implements `MonitorRunner` and returns one normalized
@@ -130,10 +135,15 @@ resolver call itself remains non-cancellable.
 ## Deliberately Deferred
 
 Per-monitor custom CAs and certificate pins, cookie/session authentication, DNS
-record-type queries, binary or multi-step TCP exchanges, jitter, cron scheduling,
-and in-flight request cancellation remain deferred. An ESP-IDF adapter for the
-portable ICMP configuration also remains a firmware task. The Windows host now performs
-HTTPS with WinHTTP/Schannel system trust and resolves named header secrets from the
-environment or Windows Credential Manager. The selected desktop and ESP32 TLS
-paths, plus the requirements of the first target appliances, are recorded in
+record-type queries, binary or multi-step TCP exchanges, HTTP response-header and
+latency observations, jitter, cron scheduling, and in-flight request cancellation
+remain deferred. Standalone certificate-expiry, SNMP, MQTT, UDP, NTP, mDNS, and
+Modbus/TCP runners are specification backlog rather than current types. An ESP-IDF
+adapter for every transport, including the portable ICMP configuration, remains a
+firmware task.
+
+The Windows host performs HTTPS with WinHTTP/Schannel system trust and resolves
+named header secrets from the environment or Windows Credential Manager. The UniFi
+and OpenWrt sidecars separately implement explicit pre-auth leaf pins; generic C++
+per-monitor pin/custom-CA policy is still deferred. See
 [Appliance Monitoring and TLS](appliance-monitoring.md).

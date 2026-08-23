@@ -78,6 +78,15 @@ std::vector<std::string> unique_sources(const pixelstatus::AppConfig& config) {
                         }
                     }
                 }
+                const auto* aggregate =
+                    std::get_if<pixelstatus::LayoutAggregateStatusConfig>(&widget);
+                if (aggregate != nullptr) {
+                    for (const auto& source : aggregate->sources) {
+                        if (seen.insert(source).second) {
+                            sources.push_back(source);
+                        }
+                    }
+                }
             }
         }
     }

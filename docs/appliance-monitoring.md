@@ -5,6 +5,11 @@ appliance integrations. Monitor evaluation, scheduling, and state publication
 remain portable. Desktop and ESP32 runners may use different native network
 libraries as long as they implement the same `MonitorRunner` result contract.
 
+As of 2026-08-22, generic Windows monitoring plus real UniFi and OpenWrt collectors
+are implemented; TrueNAS API depth, Netgear telemetry, Starlink dish telemetry, and
+all ESP32 adapters remain open. The canonical cross-project summary is
+[Implementation Status and Loose Ends](implementation-status.md).
+
 ## Current Capability
 
 The desktop HTTP runner currently supports bounded `GET`, `HEAD`, `POST`, `PUT`,
@@ -33,8 +38,10 @@ diagnostics.
 WinHTTP performs TLS and server-certificate validation through Windows. This lets
 development machines trust a local appliance CA through the normal Windows
 certificate store. A per-appliance pin is useful when changing the machine-wide
-trust store is undesirable, but pin verification and rollover remain a later
-increment.
+trust store is undesirable. Generic C++ monitor pin/custom-CA configuration and
+rollover remain a later increment. The implemented UniFi and OpenWrt Python
+collectors already enforce an explicit leaf-certificate SHA-256 pin before sending
+credentials; their policy is intentionally narrower than the future generic one.
 
 ESP-IDF HTTPS uses ESP-TLS and mbedTLS. Public Internet services can use the ESP
 certificate bundle; a self-signed or privately issued LAN appliance should provide
@@ -111,14 +118,21 @@ installed Network application's **Integrations** page because the local API foll
 the installed controller version. Cloud Gateways normally serve local management
 over HTTPS port 443; self-hosted Network servers commonly use 8443.
 
-Initial mechanism:
+Implemented Windows mechanism:
 
-1. Create a least-privilege local API key and store it through the secret provider.
-2. Trust the gateway/controller certificate or configure a deliberate pin.
-3. Use the generic HTTP runner with `X-API-Key` for a device-detail request and
-   select its scalar state through JSON Pointer.
-4. Add UniFi-specific discovery only if maintaining site and device identifiers by
-   hand proves fragile.
+1. Store a scoped local API key as `PixelStatus-NX/unifi-api-key` in the current
+   user's Windows Credential Manager.
+2. Run the loopback-only `tools/unifi` collector with the official local Integration
+   API URL and an explicitly verified leaf-certificate SHA-256 pin.
+3. The collector discovers application, site, and adopted gateway identifiers,
+   combines device/latest-statistics/WAN data, removes addresses and object IDs, and
+   publishes a bounded sanitized `/health` document.
+4. Ordinary PixelStatus HTTP monitors evaluate JSON pointers in that document.
+
+The implementation and provisioning procedure are in
+[UniFi Network Monitoring](unifi-monitoring.md). The tested API identifies
+configured WANs and aggregate gateway metrics but did not expose independent live
+health for each WAN in the observed response.
 
 Official references:
 
@@ -174,24 +188,29 @@ Official sources:
 - [Official device protobuf](https://github.com/SpaceExplorationTechnologies/enterprise-api/blob/master/device-api/device.proto)
 - [Official Python demonstration](https://github.com/SpaceExplorationTechnologies/enterprise-api/blob/master/device-api/demo.py)
 
+The current display's Starlink state is narrower than this proposed dish adapter.
+The implemented OpenWrt collector confirms Wi-Fi association plus a live
+DHCP/default route toward the Starlink router. It deliberately labels that result
+`router-path`; it does not claim dish obstruction, latency, alignment, or outage
+telemetry. See [OpenWrt Starlink Bridge Monitoring](openwrt-monitoring.md).
+
 ## Remaining Implementation Order
 
 Named secret references, environment/Credential Manager resolution, redaction
-tests, the WinHTTP/Schannel system-trust runner, generic JSON array length, generic
-numeric ratio, authenticated vendor-shaped fixtures, and an end-to-end composite
-display smoke test are complete. Continue with:
+tests, WinHTTP/Schannel system trust, JSON array/ratio projections, authenticated
+vendor-shaped fixtures, the live UniFi adapter, the live OpenWrt adapter, and the
+composite display smoke path are complete. Continue with:
 
-1. Compare the installed TrueNAS `/api/docs/` response shapes and UniFi Integrations
-   documentation with the public fixture, then create ignored live profiles using
-   named secrets, local HTTPS names, and the actual site/device identifiers.
-2. Validate pool health, alert count, storage utilization, gateway state, and WAN
-   utilization against the live appliances. Record only sanitized response shapes
-   if the real schemas require another bounded projection.
-3. Add deterministic certificate fixtures for trusted, unknown-CA, hostname-
-   mismatch, and pinned-certificate cases; implement per-monitor pinning or private
-   CA selection only after that policy is fixed.
-4. Build the Starlink desktop sidecar and recorded-response fixtures.
-5. Identify the exact Netgear modem model and decide whether reachability is enough
-   or a model-specific proxy is justified.
-6. Keep all of the above host-tested. Add ESP-IDF `esp_http_client` and encrypted-NVS
-   adapters only when firmware deployment becomes necessary.
+1. Match the installed TrueNAS CORE `/api/docs/` shapes and validate real pool
+   health, active alert count, disk health, and storage utilization. The current
+   private cell proves only HTTP UI reachability.
+2. Add deterministic certificate fixtures for trusted, unknown-CA, hostname-
+   mismatch, pin match, and rollover; then expose the chosen custom-CA/pin policy to
+   generic C++ monitors.
+3. Build a bounded Starlink gRPC/protobuf sidecar and recorded-response fixtures.
+   Provide an explicit routed/proxied path that disambiguates the dish from the
+   cable modem when both use `192.168.100.1`.
+4. Identify the exact Netgear model/firmware and decide whether current UI
+   reachability is sufficient or a model-specific sanitized proxy is justified.
+5. Keep every adapter host-tested. Add ESP-IDF `esp_http_client`, ESP-TLS, native
+   appliance adapters, and protected-NVS secrets only when firmware work begins.
