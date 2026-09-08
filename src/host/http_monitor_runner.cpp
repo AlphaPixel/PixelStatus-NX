@@ -309,12 +309,12 @@ public:
         : config_(std::move(config)), url_(std::move(url)) {}
 
     MonitorResult run(TimePoint) override {
+#ifdef _WIN32
         auto transport = url_.scheme == HttpScheme::http
             ? perform_httplib_request(config_, url_)
-#ifdef _WIN32
             : perform_winhttp_request(config_);
 #else
-            : HttpTransportResponse{};
+        auto transport = perform_httplib_request(config_, url_);
 #endif
         MonitorResult result;
         result.observed_at = transport.observed_at;
@@ -420,9 +420,9 @@ MonitorRunnerCreationResult create_http_monitor_runner(
     if (!url) {
         return {nullptr, "HTTP URL is invalid or unsupported by the desktop adapter"};
     }
-#ifndef _WIN32
+#if !defined(_WIN32) && !defined(CPPHTTPLIB_OPENSSL_SUPPORT)
     if (url->scheme != HttpScheme::http) {
-        return {nullptr, "HTTPS is not enabled in the current desktop HTTP adapter"};
+        return {nullptr, "HTTPS requires PIXELSTATUS_ENABLE_OPENSSL on this host"};
     }
 #endif
     if (http_method_name(config.method).empty()) {

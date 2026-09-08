@@ -50,10 +50,17 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
+## OpenSSL
+
+The Linux host target links against the system-provided OpenSSL 3 libraries for
+HTTPS client support. OpenSSL 3 is licensed under the Apache License 2.0. Its
+license and notices are distributed by the operating-system package and are
+available from <https://www.openssl.org/source/license.html>.
+
 ## Bleak
 
-The Windows diagnostic MI Bluetooth bridge uses Bleak when that optional Python
-host dependency is installed.
+The Windows/Linux diagnostic MI Bluetooth bridge uses Bleak when that optional
+Python host dependency is installed.
 
 MIT License
 

@@ -1,0 +1,16 @@
+[Unit]
+Description=PixelStatus NX browser display and monitor runtime
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=@PIXELSTATUS_WORKING_DIRECTORY@
+EnvironmentFile=-%h/.config/pixelstatus-nx/environment
+ExecStart="@PIXELSTATUS_SIMULATOR@" "@PIXELSTATUS_CONFIG@" --no-window --no-api --web-display-bind "@PIXELSTATUS_WEB_BIND@" --web-display-port @PIXELSTATUS_WEB_PORT@
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=15s
+
+[Install]
+WantedBy=default.target

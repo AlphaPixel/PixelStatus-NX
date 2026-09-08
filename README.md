@@ -14,10 +14,13 @@ PixelStatus NX is deliberately **not** intended to become a general-purpose moni
 
 The current target hardware includes an ESP32 and a **16×16 RGB Bluetooth-connected display**, but neither the monitoring system nor rendering architecture should be coupled to that particular display.
 
-Development begins with a portable C++20 core and a native Win32 display simulator.
-This permits configuration, state, timing, appearance, layout, framebuffer, and
-output-driver behavior to be developed without ESP32 tools or hardware. See
-[Host-First Development](docs/host-development.md) for build and run instructions.
+Development begins with a portable C++20 core, a native Win32 display simulator,
+and a headless Linux browser runtime. This permits configuration, state, timing,
+appearance, layout, framebuffer, monitoring, and output-driver behavior to be
+developed without ESP32 tools or hardware. See
+[Host-First Development](docs/host-development.md) for the Windows workflow and
+[Linux Host](docs/linux-host.md) for a clean-machine Linux bootstrap, browser
+runtime, BlueZ/Bleak bridge, and persistent user-service setup.
 The authoritative feature matrix, live-validation boundary, and consolidated
 backlog are in [Implementation Status and Loose Ends](docs/implementation-status.md).
 In the numbered design sections below, **should**, **may**, **possible**, and
@@ -75,6 +78,8 @@ collector for Wi-Fi bridge and Starlink router-path status, documented in
 For unattended use during development, a tested snapshot can be published outside
 the working tree and run at interactive user logon as described in
 [Windows Published Runtime and Task Scheduler](docs/windows-task-scheduler.md).
+Linux can run the source-tree release build and optional BLE bridge as supervised
+systemd user services described in [Linux Host](docs/linux-host.md).
 The staged host-layout, live-data, Windows Bluetooth, and eventual ESP32 work is
 tracked in the [Development Roadmap](docs/development-roadmap.md).
 
@@ -296,9 +301,9 @@ Useful for:
 
 Additional output drivers should be possible without altering monitor or renderer code.
 
-The host build currently includes both a native Win32 driver and an HTTP browser
-driver. They consume the same logical frame concurrently, and the HTTP driver can
-run headlessly for browser-only or remote-display use.
+The Windows host build includes both a native Win32 driver and an HTTP browser
+driver. Linux builds the same HTTP driver as a headless browser-only runtime. Both
+paths consume the same logical frames used by the BLE and future firmware drivers.
 
 Example interface:
 
@@ -485,7 +490,7 @@ A small worker pool, perhaps 2–4 simultaneous network operations, is sufficien
 Support two scheduling styles.
 
 Implementation status: deterministic interval scheduling and a bounded one-to-eight
-worker Windows executor are complete. Jitter and cron-like schedules are planned,
+worker desktop executor are complete on Windows and Linux. Jitter and cron-like schedules are planned,
 not accepted by Configuration V1.
 
 ## Interval Scheduling
@@ -533,10 +538,11 @@ System time should be synchronized using SNTP/NTP.
 
 # 10. Initial Pull Monitor Types
 
-Implementation status: the current Windows runner types are `icmp_ping`, `dns`,
-`tcp_connect`, `tcp_exchange`, and `http` (including HTTPS). Their exact JSON
-contract is in [Configuration V1](docs/configuration-v1.md). Examples in this
-architectural section may describe richer future observations than the V1 schema.
+Implementation status: Windows runner types are `icmp_ping`, `dns`, `tcp_connect`,
+`tcp_exchange`, and `http` (including HTTPS). Linux implements all of those except
+`icmp_ping`; its HTTPS path uses OpenSSL and system trust. Their exact JSON contract
+is in [Configuration V1](docs/configuration-v1.md). Examples in this architectural
+section may describe richer future observations than the V1 schema.
 
 ## ICMP Ping
 
@@ -1669,7 +1675,7 @@ Configuration mutation endpoints can be added later.
 The API and internal state model should use the same status names.
 
 Implementation status: the four status GET/POST routes and read-only display route
-exist on the Windows host. `GET /api/v1/monitors` and configuration mutation routes
+exist on the Windows and Linux hosts. `GET /api/v1/monitors` and configuration mutation routes
 do not.
 
 ---
@@ -2005,10 +2011,12 @@ configuration validation behavior, output-driver ownership/backpressure contract
 and byte-level MI protocol test vectors. It does not require network monitors or
 physical display access.
 
-Status: complete on the Windows/portable-core path and substantially exceeded. The
-repository also has real pull monitors, browser output, composite card decks,
-vendor adapters, and a physically validated Windows MI bridge. ESP32 work remains
-separate; see the [current status ledger](docs/implementation-status.md).
+Status: complete on the Windows, Linux-headless, and portable-core paths and
+substantially exceeded. The repository also has real pull monitors, browser output,
+composite card decks, vendor adapters, and a physically validated Windows MI bridge.
+Linux MI support uses the same Bleak bridge through BlueZ and awaits physical Linux
+acceptance. ESP32 work remains separate; see the
+[current status ledger](docs/implementation-status.md).
 
 After host rendering and layout are verified, validate the MI display from Windows
 with the Python/`bleak` reference transport. The later ESP32 stage replaces that

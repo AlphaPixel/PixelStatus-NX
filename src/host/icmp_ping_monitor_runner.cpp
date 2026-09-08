@@ -23,13 +23,12 @@ namespace {
 
 constexpr Duration maximum_timeout = std::chrono::seconds(30);
 
+#ifdef _WIN32
 void finish_result(MonitorResult& result, std::chrono::steady_clock::time_point begin) {
     const auto finished = std::chrono::steady_clock::now();
     result.observed_at = finished;
     result.latency = std::chrono::duration_cast<Duration>(finished - begin);
 }
-
-#ifdef _WIN32
 
 struct AddressListGuard {
     addrinfo* addresses{};

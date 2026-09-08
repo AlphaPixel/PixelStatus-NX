@@ -31,6 +31,53 @@
         "PIXELSTATUS_BUILD_SIMULATOR": "OFF",
         "PIXELSTATUS_BUILD_TESTS": "ON"
       }
+    },
+    {
+      "name": "linux-debug",
+      "displayName": "Linux headless/browser Debug",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/out/build/linux-debug",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+        "PIXELSTATUS_BUILD_HOST_HTTP": "ON",
+        "PIXELSTATUS_BUILD_SIMULATOR": "ON",
+        "PIXELSTATUS_BUILD_TESTS": "ON",
+        "PIXELSTATUS_ENABLE_OPENSSL": "ON"
+      },
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      }
+    },
+    {
+      "name": "linux-release",
+      "displayName": "Linux headless/browser Release",
+      "inherits": "linux-debug",
+      "binaryDir": "${sourceDir}/out/build/linux-release",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release"
+      }
+    },
+    {
+      "name": "linux-core-debug",
+      "displayName": "Linux portable core Debug",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/out/build/linux-core-debug",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+        "PIXELSTATUS_BUILD_HOST_HTTP": "OFF",
+        "PIXELSTATUS_BUILD_SIMULATOR": "OFF",
+        "PIXELSTATUS_BUILD_TESTS": "ON",
+        "PIXELSTATUS_ENABLE_OPENSSL": "OFF"
+      },
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      }
     }
   ],
   "buildPresets": [
@@ -43,6 +90,18 @@
       "name": "windows-core-debug",
       "configurePreset": "windows-core-debug",
       "configuration": "Debug"
+    },
+    {
+      "name": "linux-debug",
+      "configurePreset": "linux-debug"
+    },
+    {
+      "name": "linux-release",
+      "configurePreset": "linux-release"
+    },
+    {
+      "name": "linux-core-debug",
+      "configurePreset": "linux-core-debug"
     }
   ],
   "testPresets": [
@@ -58,6 +117,27 @@
       "name": "windows-core-debug",
       "configurePreset": "windows-core-debug",
       "configuration": "Debug",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "linux-debug",
+      "configurePreset": "linux-debug",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "linux-release",
+      "configurePreset": "linux-release",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "linux-core-debug",
+      "configurePreset": "linux-core-debug",
       "output": {
         "outputOnFailure": true
       }

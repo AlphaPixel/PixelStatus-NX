@@ -19,6 +19,8 @@ param(
     [string]$OpenWrtCertificateSha256,
     [string]$PythonExecutable,
     [string]$MiStatusFile,
+    [string]$ProcessFile,
+    [switch]$RestartMiBridge,
     [switch]$BrowserOnly
 )
 
@@ -32,6 +34,81 @@ function Resolve-RepositoryPath {
         return Resolve-Path -LiteralPath $Path
     }
     return Resolve-Path -LiteralPath (Join-Path $repositoryRoot $Path)
+}
+
+function Stop-RecordedRuntimeProcesses {
+    if (-not $ProcessFile -or -not (Test-Path -LiteralPath $ProcessFile)) {
+        return
+    }
+    try {
+        $manifest = Get-Content -Raw -LiteralPath $ProcessFile | ConvertFrom-Json
+        foreach ($entry in @($manifest.processes)) {
+            if ($entry.role -notin @('simulator', 'unifi', 'openwrt')) {
+                continue
+            }
+            $process = Get-Process -Id ([int]$entry.pid) -ErrorAction SilentlyContinue
+            if ($null -eq $process) {
+                continue
+            }
+            $actualPath = $process.Path
+            $recordedPath = [IO.Path]::GetFullPath([string]$entry.executable)
+            $actualStart = $process.StartTime.ToUniversalTime()
+            $recordedStart = [DateTimeOffset]::Parse(
+                [string]$entry.started_at
+            ).UtcDateTime
+            if (
+                $actualPath -and
+                [IO.Path]::GetFullPath($actualPath).Equals(
+                    $recordedPath,
+                    [StringComparison]::OrdinalIgnoreCase
+                ) -and
+                [Math]::Abs(($actualStart - $recordedStart).TotalSeconds) -lt 1
+            ) {
+                Stop-Process -Id $process.Id
+                $process.WaitForExit()
+            } else {
+                Write-Warning (
+                    "Skipped stale runtime PID $($entry.pid); " +
+                    'the executable or start time no longer matches'
+                )
+            }
+        }
+    } catch {
+        Write-Warning "Unable to clean recorded runtime processes: $_"
+    } finally {
+        Remove-Item -LiteralPath $ProcessFile -Force -ErrorAction SilentlyContinue
+    }
+}
+
+function Write-RuntimeProcessManifest {
+    if (-not $ProcessFile) {
+        return
+    }
+    $entries = @()
+    foreach ($item in @(
+        @{Role = 'simulator'; Process = $simulatorProcess},
+        @{Role = 'unifi'; Process = $unifiProcess},
+        @{Role = 'openwrt'; Process = $openWrtProcess}
+    )) {
+        $process = $item.Process
+        if ($null -ne $process -and -not $process.HasExited) {
+            $entries += [ordered]@{
+                role = $item.Role
+                pid = $process.Id
+                executable = $process.Path
+                started_at = $process.StartTime.ToUniversalTime().ToString('o')
+            }
+        }
+    }
+    $directory = Split-Path -Parent $ProcessFile
+    New-Item -ItemType Directory -Path $directory -Force | Out-Null
+    $temporary = "$ProcessFile.$PID.next"
+    [ordered]@{
+        schema_version = 1
+        owner_pid = $PID
+        processes = $entries
+    } | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $temporary -Encoding utf8
+    Move-Item -LiteralPath $temporary -Destination $ProcessFile -Force
 }
 
 $buildPath = Resolve-RepositoryPath -Path $BuildDirectory
@@ -71,6 +148,7 @@ $openWrtProcess = $null
 
 Push-Location $repositoryRoot
 try {
+    Stop-RecordedRuntimeProcesses
     if ($useUnifiCollector) {
         $unifiArguments = @(
             '-m', 'tools.unifi', 'serve',
@@ -85,6 +163,7 @@ try {
             -WorkingDirectory $repositoryRoot `
             -WindowStyle Hidden `
             -PassThru
+        Write-RuntimeProcessManifest
 
         $unifiHealthUrl = 'http://127.0.0.1:18950/health'
         $unifiDeadline = [DateTime]::UtcNow.AddSeconds(20)
@@ -123,6 +202,7 @@ try {
             -WorkingDirectory $repositoryRoot `
             -WindowStyle Hidden `
             -PassThru
+        Write-RuntimeProcessManifest
 
         $openWrtHealthUrl = 'http://127.0.0.1:18951/health'
         $openWrtDeadline = [DateTime]::UtcNow.AddSeconds(20)
@@ -152,6 +232,7 @@ try {
         -ArgumentList $simulatorArguments `
         -WindowStyle Hidden `
         -PassThru
+    Write-RuntimeProcessManifest
 
     $displayUrl = "http://127.0.0.1:$WebPort/api/v1/display"
     $browserUrl = "http://127.0.0.1:$WebPort/"
@@ -200,10 +281,21 @@ try {
         }
 
         Write-Host "Mirroring to MI Matrix Display in $MiMode mode."
-        & $pythonPath @bridgeArguments
-        if ($LASTEXITCODE -ne 0) {
-            throw "MI BLE bridge exited with code $LASTEXITCODE"
-        }
+        do {
+            & $pythonPath @bridgeArguments
+            $bridgeExitCode = $LASTEXITCODE
+            if (-not $RestartMiBridge) {
+                if ($bridgeExitCode -ne 0) {
+                    throw "MI BLE bridge exited with code $bridgeExitCode"
+                }
+                break
+            }
+            Write-Warning (
+                "MI BLE bridge exited with code $bridgeExitCode; " +
+                'restarting in five seconds'
+            )
+            Start-Sleep -Seconds 5
+        } while ($true)
     }
 } finally {
     if ($null -ne $simulatorProcess -and -not $simulatorProcess.HasExited) {
@@ -217,6 +309,9 @@ try {
     if ($null -ne $openWrtProcess -and -not $openWrtProcess.HasExited) {
         Stop-Process -Id $openWrtProcess.Id
         $openWrtProcess.WaitForExit()
+    }
+    if ($ProcessFile) {
+        Remove-Item -LiteralPath $ProcessFile -Force -ErrorAction SilentlyContinue
     }
     Pop-Location
 }

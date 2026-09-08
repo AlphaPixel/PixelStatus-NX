@@ -5,8 +5,9 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
-from tools.mi_ble.bridge import LatestFrameSlot
+from tools.mi_ble.bridge import LatestFrameSlot, _close_connection_quietly
 from tools.mi_ble.display import MiBleError, MiFrameWriter
 from tools.mi_ble.frame_source import DisplayFrame, FrameSourceError, parse_display_document
 from tools.mi_ble.protocol import (
@@ -39,7 +40,19 @@ class StatusFileTests(unittest.TestCase):
             self.assertEqual(document["source_frame"], 42)
             self.assertEqual(document["gatt_writes"], 8)
             self.assertNotIn("address", document)
-            self.assertFalse(path.with_name("mi-status.json.next").exists())
+            self.assertEqual(tuple(path.parent.glob("mi-status.json.*.next")), ())
+
+    def test_status_write_failure_is_nonfatal(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "mi-status.json"
+            status = BridgeStatusFile(str(path))
+            with mock.patch(
+                "tools.mi_ble.status_file.os.replace",
+                side_effect=PermissionError("temporarily locked"),
+            ):
+                self.assertFalse(status.update("displaying", connected=True))
+            self.assertFalse(path.exists())
+            self.assertEqual(tuple(path.parent.glob("mi-status.json.*.next")), ())
 
 
 class FakeGattWriter:
@@ -49,6 +62,11 @@ class FakeGattWriter:
 
     async def write(self, packet: bytes, *, response: bool) -> None:
         self.writes.append((packet, response))
+
+
+class FailingCloseConnection:
+    async def close(self) -> None:
+        raise OSError("already disconnected")
 
 
 class ProtocolTests(unittest.TestCase):
@@ -112,6 +130,9 @@ class FrameSourceTests(unittest.TestCase):
 
 
 class FrameWriterTests(unittest.IsolatedAsyncioTestCase):
+    async def test_disconnect_cleanup_failure_is_nonfatal(self) -> None:
+        await _close_connection_quietly(FailingCloseConnection())
+
     async def test_pixel_mode_full_then_sparse(self) -> None:
         transport = FakeGattWriter()
         writer = MiFrameWriter(

@@ -5,9 +5,10 @@ frame and serves it to a browser. It consumes exactly the same `Frame` produced 
 the Win32 simulator and future physical drivers; monitor, state, appearance, layout,
 and rendering code do not know that a browser is attached.
 
-This backend is implemented, host-tested, and used by both live browser viewing and
-the Windows MI bridge. It is a production-useful desktop output, not a configuration
-management UI. See [Implementation Status and Loose Ends](implementation-status.md).
+This backend is implemented, host-tested, and used by live browser viewing and the
+Windows/Linux MI bridge. It is the native display backend for a headless Linux host,
+not a configuration management UI. See
+[Implementation Status and Loose Ends](implementation-status.md).
 
 The simulator starts this backend by default on loopback port 8788:
 
@@ -15,8 +16,16 @@ The simulator starts this backend by default on loopback port 8788:
 .\out\build\windows-debug\Debug\pixelstatus_simulator.exe
 ```
 
-Open `http://127.0.0.1:8788/`. The native and browser windows display the same
-logical framebuffer. To run only the browser backend:
+On Linux, build and run the browser-only target with:
+
+```bash
+cmake --preset linux-release
+cmake --build --preset linux-release
+bash tools/run-linux-demo.sh
+```
+
+Open `http://127.0.0.1:8788/`. On Windows, the native and browser windows display
+the same logical framebuffer. To run only the browser backend:
 
 ```powershell
 .\out\build\windows-debug\Debug\pixelstatus_simulator.exe --no-window
@@ -102,3 +111,5 @@ frame through the HTTP API:
 
 The private operations runtime serves the same backend on loopback port 18908 and
 its Scheduled Task status check verifies that the sequence continues advancing.
+Linux build, network-binding, BlueZ, and persistent systemd user-service acceptance
+are documented in [Linux Host](linux-host.md).

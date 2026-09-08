@@ -113,3 +113,6 @@ Desktop.ini
 # test output & cache
 Testing/
 .cache/
+
+# local stuff
+*-local-*

@@ -105,6 +105,17 @@ async def _wait_for_frame_or_disconnect(
     return frame_task.result()
 
 
+async def _close_connection_quietly(connection: BleakConnection) -> None:
+    try:
+        await connection.close()
+    except Exception as error:
+        LOGGER.warning(
+            "Unable to close stale MI connection (%s): %s",
+            type(error).__name__,
+            error,
+        )
+
+
 async def output_frames(slot: LatestFrameSlot, options: BridgeOptions) -> None:
     generation, frame = await slot.current()
     retry_delay = options.reconnect_initial_seconds
@@ -165,7 +176,11 @@ async def output_frames(slot: LatestFrameSlot, options: BridgeOptions) -> None:
         except asyncio.CancelledError:
             raise
         except Exception as error:
-            LOGGER.warning("BLE output unavailable: %s", error)
+            LOGGER.warning(
+                "BLE output unavailable (%s): %s",
+                type(error).__name__,
+                error,
+            )
             status.update(
                 "retrying",
                 connected=False,
@@ -176,7 +191,7 @@ async def output_frames(slot: LatestFrameSlot, options: BridgeOptions) -> None:
             generation, frame = await slot.current()
         finally:
             if connection is not None:
-                await connection.close()
+                await _close_connection_quietly(connection)
 
 
 async def run_bridge(source: HttpFrameSource, options: BridgeOptions) -> None:

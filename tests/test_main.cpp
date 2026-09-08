@@ -2295,7 +2295,7 @@ void test_host_http_monitor_runner() {
     CHECK(result.error == pixelstatus::MonitorError::response_too_large);
 
     config.url = "https://example.test/health";
-#ifdef _WIN32
+#if defined(_WIN32) || defined(CPPHTTPLIB_OPENSSL_SUPPORT)
     CHECK(pixelstatus::host::create_http_monitor_runner(config));
     config.url = server.url("/health");
     config.url.replace(0U, 4U, "https");
@@ -2454,6 +2454,13 @@ void test_host_icmp_ping_monitor_runner() {
     config.timeout = 1s;
 
     auto created = pixelstatus::host::create_icmp_ping_monitor_runner(config);
+#ifndef _WIN32
+    CHECK(!created);
+    CHECK(created.error.find("not implemented") != std::string::npos);
+    created = pixelstatus::host::create_monitor_runner(
+        pixelstatus::MonitorSourceConfig{config});
+    CHECK(!created);
+#else
     CHECK(created);
     auto result = created.runner->run(std::chrono::steady_clock::now());
     CHECK(result.transport_success);
@@ -2467,6 +2474,7 @@ void test_host_icmp_ping_monitor_runner() {
     CHECK(created);
     result = created.runner->run(std::chrono::steady_clock::now());
     CHECK(result.transport_success);
+#endif
 
     config.host = "bad host";
     CHECK(!pixelstatus::host::create_icmp_ping_monitor_runner(config));

@@ -4,8 +4,11 @@ PixelStatus NX is designed so that monitoring, state, appearance, layout, render
 and logical-frame behavior can be completed and tested on a desktop before an ESP32
 toolchain or device is introduced.
 
-The current host target is 64-bit Windows using Visual Studio 2022 and CMake. The
-simulator uses Win32 GDI and has no runtime graphics dependency.
+The primary interactive host target is 64-bit Windows using Visual Studio 2022 and
+CMake. The simulator uses Win32 GDI and has no runtime graphics dependency. A
+second native Linux target builds the same C++ host without the Win32 driver and
+serves the framebuffer through the browser backend. Its from-scratch build, OpenSSL
+HTTPS, BlueZ/Bleak, and systemd instructions are in [Linux Host](linux-host.md).
 
 The host feature set is mature enough to run the real monitoring deck and MI panel
 from an immutable per-user Scheduled Task. The complete implemented/planned split is
@@ -186,6 +189,18 @@ in [`windows-task-scheduler.md`](windows-task-scheduler.md). The task runs an
 immutable release copy rather than the build tree, so it does not lock the
 simulator being rebuilt or consume partially edited Python modules.
 
+After the first publication, update and re-register that runtime from its existing
+local profile with:
+
+```powershell
+.\tools\update-windows-runtime.ps1
+```
+
+The runtime records and validates its child PIDs, paths, and start times across task
+restarts, supervises an unexpectedly exited BLE process, and reports a heartbeat
+older than 60 seconds as stale. Use `-CleanLegacyProcesses` only once when migrating
+from a release created before the process manifest existed.
+
 For an official local UniFi API connection with a named Windows credential and an
 explicit certificate pin, run the loopback collector documented in
 [`unifi-monitoring.md`](unifi-monitoring.md). Its sanitized `/health` document is a
@@ -238,7 +253,9 @@ Python is used only for the mock upstream fixture; the monitor implementations a
 all application behavior under test are C++20.
 
 CMake downloads the pinned `nlohmann/json` 3.12.0 and `cpp-httplib` 0.51.0
-releases into the ignored build tree. No dependency is installed globally.
+releases into the ignored build tree. No dependency is installed globally by
+CMake. Linux supplies OpenSSL 3 as a system development package and requires it in
+the full host presets so HTTPS cannot be disabled accidentally.
 
 The canonical configuration contract is
 [`schemas/pixelstatus-config-v1.schema.json`](../schemas/pixelstatus-config-v1.schema.json).
@@ -368,10 +385,11 @@ The simulator supports:
 
 The renderer knows only the `OutputDriver` contract. The Win32 and HTTP display
 drivers independently copy and coalesce submitted logical frames in the same way
-that a slow BLE driver must do. The implemented Python/Bleak bridge consumes the
-HTTP driver's frame API; a future SDL, direct-LED, ESP32 NimBLE, or optional native
-C++/WinRT implementation can use the same framebuffer without changing state,
-appearance, layout, or renderer code.
+that a slow BLE driver must do. Linux runs that HTTP driver without compiling any
+Win32 source. The implemented Python/Bleak bridge consumes the HTTP driver's frame
+API through WinRT on Windows or BlueZ D-Bus on Linux; a future SDL, direct-LED,
+ESP32 NimBLE, or optional native C++/WinRT implementation can use the same
+framebuffer without changing state, appearance, layout, or renderer code.
 
 The HTTP transport is similarly thin: it translates native HTTP requests into the
 portable `StatusApi` request/response contract. The validation and state-update
@@ -389,11 +407,11 @@ NVS, LittleFS, GPIO, or OTA support. MI packet construction is host-tested and t
 Windows/Bleak pixel and block paths have delivered live framebuffers to the physical
 display with confirmed orientation and color. A forced mid-transfer disconnect,
 longer soak, and same-connection mode switching remain hardware-validation tasks.
-WinHTTP/Schannel HTTPS,
+WinHTTP/Schannel HTTPS on Windows and cpp-httplib/OpenSSL HTTPS on Linux,
 system certificate trust, named desktop secrets, bounded HTTP methods, request
 headers and bodies, scalar/array-length/ratio JSON extraction, TCP connect, bounded TCP text exchange,
-ICMP echo, DNS address resolution, evaluation, concurrent interval execution, and display
-responsiveness are implemented and host-tested. Generic per-monitor custom CAs,
+Windows ICMP echo, DNS address resolution, evaluation, concurrent interval execution, and display
+responsiveness are implemented and host-tested. Linux ICMP, generic per-monitor custom CAs,
 certificate pins, cron/jitter, and additional pull transports remain deferred; the
 UniFi/OpenWrt sidecars already implement their own pre-auth leaf pins. See
 [Appliance Monitoring and TLS](appliance-monitoring.md) for the selected Win32 and

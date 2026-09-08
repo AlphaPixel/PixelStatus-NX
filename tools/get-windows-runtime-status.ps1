@@ -1,7 +1,9 @@
 [CmdletBinding()]
 param(
     [string]$RuntimeRoot = (Join-Path $env:LOCALAPPDATA 'AlphaPixel\PixelStatus-NX'),
-    [string]$TaskName = 'AlphaPixel PixelStatus-NX'
+    [string]$TaskName = 'AlphaPixel PixelStatus-NX',
+    [ValidateRange(5, 3600)]
+    [int]$MiHeartbeatMaximumAgeSeconds = 60
 )
 
 $ErrorActionPreference = 'Stop'
@@ -26,6 +28,29 @@ $miStatus = if (Test-Path -LiteralPath $miStatusPath) {
     }
 } else {
     $null
+}
+$miUpdatedAt = $null
+$miHeartbeatAgeSeconds = $null
+$miHeartbeatFresh = $false
+if ($null -ne $miStatus -and $miStatus.updated_at) {
+    try {
+        if ($miStatus.updated_at -is [DateTime]) {
+            $miUpdatedAt = [DateTimeOffset]$miStatus.updated_at
+        } else {
+            $miUpdatedAt = [DateTimeOffset]::Parse([string]$miStatus.updated_at)
+        }
+        $miHeartbeatAgeSeconds = [Math]::Max(
+            0,
+            [Math]::Floor(
+                ([DateTimeOffset]::UtcNow - $miUpdatedAt.ToUniversalTime()).TotalSeconds
+            )
+        )
+        $miHeartbeatFresh = (
+            $miHeartbeatAgeSeconds -le $MiHeartbeatMaximumAgeSeconds
+        )
+    } catch {
+        $miUpdatedAt = $null
+    }
 }
 
 function Get-EndpointState {
@@ -53,8 +78,17 @@ function Get-EndpointState {
     Browser = Get-EndpointState 'http://127.0.0.1:18908/api/v1/display'
     UniFiCollector = Get-EndpointState 'http://127.0.0.1:18950/health'
     OpenWrtCollector = Get-EndpointState 'http://127.0.0.1:18951/health'
-    MiDisplay = if ($null -ne $miStatus) { $miStatus.status } else { 'unavailable' }
+    MiDisplay = if ($null -eq $miStatus) {
+        'unavailable'
+    } elseif (-not $miHeartbeatFresh) {
+        'stale'
+    } else {
+        $miStatus.status
+    }
+    MiReportedStatus = if ($null -ne $miStatus) { $miStatus.status } else { $null }
     MiSourceFrame = if ($null -ne $miStatus) { $miStatus.source_frame } else { $null }
-    MiUpdatedAt = if ($null -ne $miStatus) { $miStatus.updated_at } else { $null }
+    MiUpdatedAt = $miUpdatedAt
+    MiHeartbeatAgeSeconds = $miHeartbeatAgeSeconds
+    MiHeartbeatFresh = $miHeartbeatFresh
     Log = Join-Path $RuntimeRoot 'logs\runtime.log'
 }

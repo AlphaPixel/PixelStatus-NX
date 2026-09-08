@@ -135,8 +135,10 @@ and inclusive `between`. Every referenced status must exist in the top-level
 
 HTTP requests default to `GET`. The desktop adapter also supports `HEAD`, `POST`,
 `PUT`, `PATCH`, and `DELETE`, bounded custom headers, and a bounded text body.
-On Windows, `https://` uses WinHTTP/Schannel with the Windows trusted-root stores,
-hostname validation, and redirects disabled.
+On Windows, `https://` uses WinHTTP/Schannel with the Windows trusted-root stores.
+On Linux, it uses `cpp-httplib` with required OpenSSL 3 support and the host's
+system CA paths. Both paths enable server-certificate and hostname validation and
+disable redirects.
 
 ```json
 {
@@ -197,15 +199,16 @@ can contain one or more named references such as
 digits, dots, underscores, or hyphens. The desktop resolves each reference when the
 monitor is created and fails startup if any reference is invalid or unresolved.
 
-The Windows resolver checks an environment variable first. It uppercases the name,
+Every desktop resolver checks an environment variable first. It uppercases the name,
 replaces non-alphanumeric characters with underscores, and prefixes
 `PIXELSTATUS_SECRET_`; `truenas-api-key` therefore becomes
-`PIXELSTATUS_SECRET_TRUENAS_API_KEY`. If it is absent, the resolver checks the
-current user's generic Windows Credential Manager entry named
+`PIXELSTATUS_SECRET_TRUENAS_API_KEY`. On Windows, if it is absent, the resolver also
+checks the current user's generic Windows Credential Manager entry named
 `PixelStatus-NX/truenas-api-key`. Resolved values are revalidated against the
 header bounds and never included in runner diagnostics. Environment variables are
-intended for tests and development; Credential Manager is the desktop production
-store. Encrypted ESP32 NVS remains the firmware equivalent. See
+the current Linux secret source and are also supported for tests and development on
+Windows; Credential Manager is the Windows production store. Encrypted ESP32 NVS
+remains the firmware equivalent. See
 [Appliance Monitoring and TLS](appliance-monitoring.md) for that design.
 
 To provision a desktop secret without a command-line copy, open **Credential
@@ -315,9 +318,10 @@ when a device is otherwise healthy.
 ```
 
 Timeouts and unreachable replies use the common transport-failure status. The
-desktop runner uses the Windows ICMP API and does not require a raw-socket or
-administrator process. The configuration contract is portable; the ESP32 adapter
-will implement the same result through ESP-IDF's ping facilities.
+implemented desktop runner uses the Windows ICMP API and does not require a
+raw-socket or administrator process. Linux currently rejects this monitor type at
+startup. The configuration contract is portable; a future Linux runner and the
+ESP32 adapter will implement the same result semantics.
 
 ### TCP Exchange
 

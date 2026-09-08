@@ -5,9 +5,14 @@ the Merkury / MI Bluetooth matrix from Windows. This is a host diagnostic and us
 development backend; production ESP32 firmware will implement the same protocol
 through native NimBLE rather than Python.
 
+The bridge code itself is cross-platform; on Linux the same command surface uses
+Bleak's BlueZ D-Bus backend. Linux prerequisites, validation boundaries, and
+systemd user-service setup are in [Linux Host](linux-host.md).
+
 The bridge is implemented and is the active physical-output path in the published
-Windows runtime. Physical protocol mapping is validated; a forced mid-transfer
-disconnect and longer unattended soak remain open. See
+Windows runtime. Physical protocol mapping and a controlled Scheduled Task
+termination/restart with complete display restoration are validated; a precisely
+timed mid-block disconnect and longer unattended soak remain open. See
 [Implementation Status and Loose Ends](implementation-status.md).
 
 ```text
@@ -166,7 +171,15 @@ an optional error type. It never contains the hardware address. The published
 Windows runtime writes this under its logs directory, and
 `tools\get-windows-runtime-status.ps1` includes it in the combined task health view.
 
-The bridge has demonstrated normal disconnect/retry ownership in unit tests and
-ordinary live reconnect behavior. The remaining hardware reliability acceptance is
-to force a disconnect during an active block transfer, confirm newest-frame restore,
-and complete a longer soak with recorded task and heartbeat behavior.
+Heartbeat publication is best-effort and cannot terminate frame delivery. Atomic
+replacement uses a per-process temporary name and retries transient Windows sharing
+failures. An exception while closing an already failed BLE connection is likewise
+logged and suppressed so the scan/connect loop continues. The published launcher
+adds a second containment boundary: if the Python bridge process itself exits, it is
+restarted after five seconds without taking down the renderer or collectors.
+
+The bridge has demonstrated normal disconnect/retry ownership in unit tests,
+ordinary live reconnect behavior, and newest-frame restoration after a deliberately
+restarted Scheduled Task. The remaining hardware reliability acceptance is to force
+a disconnect at a known point inside an active block transfer and complete a longer
+soak with recorded task and heartbeat behavior.

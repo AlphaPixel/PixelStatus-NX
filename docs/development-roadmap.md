@@ -1,10 +1,12 @@
 # Development Roadmap
 
 This roadmap preserves the host-first strategy: finish and regress configuration,
-monitoring, layout, framebuffer, and output behavior on Windows before introducing
-an ESP32 toolchain. [Implementation Status and Loose Ends](implementation-status.md)
+monitoring, layout, framebuffer, and output behavior on desktop hosts before
+introducing an ESP32 toolchain. Windows is the live deployment; Linux now provides
+the portable headless/browser target and BlueZ bridge path.
+[Implementation Status and Loose Ends](implementation-status.md)
 is the exhaustive capability ledger; this page records sequencing and exit gates.
-Dates reflect the latest audit on 2026-08-22. Remaining estimates are active
+Dates reflect the latest audit on 2026-08-23. Remaining estimates are active
 engineering time and exclude waiting for credentials, routing changes, soak time,
 or physical test sessions.
 
@@ -15,9 +17,10 @@ or physical test sessions.
 | 2. Split/layered layouts | Complete | — | Row/column splits, stacks, aggregate backgrounds, bars, grids, clocks, indicators, and bitmaps | None |
 | 3. Live operations deck | Complete | — | Private three-card live deck with remote and LAN/WAN checks, clocks, card-wide health layers, and deterministic regression | None |
 | 4. Appliance adapters | In progress | 3–6 days plus access | Sanitized read-only vendor data behind ordinary monitor sources | TrueNAS API, Netgear decision, and Starlink dish telemetry remain |
-| 5. Windows MI output | Operational; reliability gate open | 1–2 days plus soak/device sessions | Browser-frame-to-Bleak bridge using validated pixel and block protocols | Forced reconnect test, longer soak, and mode-switch/crossover decision |
-| 6. Windows background runtime | Operational; hardening optional | 1–3 days if selected | Immutable LocalAppData releases, per-user Scheduled Task, logs, and health inspection | Optional retention, rollback, dependency bundling, and installer work |
-| 7. ESP32 production port | Not started | 8–15 days plus hardware sessions | ESP-IDF application reusing portable behavior with native networking, storage, and MI/direct-LED outputs | Toolchain selection through final hardware/soak acceptance |
+| 5. Windows MI output | Operational; reliability gate open | 1–2 days plus soak/device sessions | Browser-frame-to-Bleak bridge using validated pixel and block protocols | Exact mid-block disconnect test, longer soak, and mode-switch/crossover decision |
+| 6. Windows background runtime | Operational; hardening optional | 1–3 days if selected | Immutable LocalAppData releases, per-user Scheduled Task, validated child cleanup, BLE process supervision, logs, and fresh/stale health inspection | Optional retention, rollback, dependency bundling, and installer work |
+| 7. Linux headless/browser port | Implemented and WSL-tested; native/BLE acceptance open | 1–2 days plus Linux/BLE access | Native headless C++ runtime, OpenSSL HTTPS, browser output, BlueZ/Bleak bridge, CI, and systemd user units | Native-host/ARM64 repeat and physical BlueZ/MI acceptance; Linux ICMP if needed |
+| 8. ESP32 production port | Not started | 8–15 days plus hardware sessions | ESP-IDF application reusing portable behavior with native networking, storage, and MI/direct-LED outputs | Toolchain selection through final hardware/soak acceptance |
 
 ## Completed Host Stages
 
@@ -79,9 +82,11 @@ without storing the Bluetooth address.
 The actual panel confirmed upper-left row-major RGB mapping, no rotation or mirror,
 top-to-bottom two-row blocks, and parity with the browser frame. Pixel and block
 paths both work; the private deck explicitly uses block mode. Remaining work is a
-forced disconnect during transfer, a longer unattended soak, and testing whether
-same-connection pixel/block switching is safe enough to justify automatic mode
-selection. A native C++/WinRT replacement is optional.
+precisely timed disconnect during a block transfer, a longer unattended soak, and
+testing whether same-connection pixel/block switching is safe enough to justify
+automatic mode selection. A controlled Scheduled Task termination/restart has
+already restored the newest complete frame. A native C++/WinRT replacement is
+optional.
 
 ## Stage 6: Windows Background Runtime
 
@@ -90,17 +95,40 @@ The tested runtime is published as immutable timestamped releases below
 the release, `current.previous.json` retains the prior selection, and a per-user
 interactive-logon task runs it independently of the working tree. Publishing stops
 and restarts an existing task safely. Logs rotate once at 5 MiB, and one status
-command checks the task, collectors, browser frame, and MI heartbeat.
+command checks the task, collectors, browser frame, and MI heartbeat, including a
+freshness threshold so an old `displaying` value cannot appear healthy.
 
-The live task was registered and verified on 2026-08-22. Optional hardening is a
+The runtime records simulator/collector PID, executable, and start-time tuples so a
+new instance can remove only its validated predecessors after a forced task stop.
+Heartbeat and BLE-close errors are nonfatal, and the published launcher restarts a
+failed bridge process after five seconds. The live task and this controlled recovery
+path were verified on 2026-08-23. Optional hardening is a
 safe old-release retention command, one-command rollback, bundled Python/Bleak or a
 versioned installer, and automated long-duration health/restart testing. Logged-out
 service execution is not a goal while BLE and user-scoped credentials require the
 interactive user.
 
-## Stage 7: ESP32 Production Port
+## Stage 7: Linux Headless/Browser Port
 
-Do not start this stage until the remaining Windows behavior that affects the
+The simulator now conditionally compiles its Win32 window and defaults to a
+browser-only process on Linux. Linux presets require OpenSSL 3 and build the normal
+HTTP(S), TCP, DNS, scheduler, renderer, browser, and API paths. A foreground shell
+launcher, Ubuntu/Debian scratch bootstrap, Linux CI job, and rendered systemd user
+units cover repeatable deployment without introducing SDL2 or an X/Wayland
+dependency.
+
+The release target and all four CTest suites pass in Ubuntu x86-64 WSL; its live
+browser endpoint and a public HTTPS monitor also pass, and both rendered systemd
+units pass `systemd-analyze`. The Python MI bridge is already backend-neutral. Bleak automatically uses BlueZ's
+D-Bus backend on Linux, and the optional user unit supervises it separately from the
+C++ process. Remaining acceptance is a native-host/ARM64 repeat, physical
+scan/probe/frame/reconnect testing, and logged-out service operation with user
+lingering. Linux ICMP is deliberately explicit backlog; every other current native
+C++ monitor type has a Linux path.
+
+## Stage 8: ESP32 Production Port
+
+Do not start this stage until the remaining desktop behavior that affects the
 portable contracts is settled. Then:
 
 1. Select and pin ESP-IDF and create the component/application build without
@@ -114,7 +142,7 @@ portable contracts is settled. Then:
 5. Add WS2812/SK6812 output if it remains a V1 requirement.
 6. Run resource, disconnect, power-loss, and long-duration tests on hardware.
 
-Python is appropriate for the Windows vendor and BLE adapters, but it is not part of
-the firmware plan. Most shared/core and firmware code remains C++20; small host
-adapters and operations tooling remain Python and PowerShell where native host APIs
-make those languages the simpler boundary.
+Python is appropriate for the Windows/Linux vendor and BLE adapters, but it is not
+part of the firmware plan. Most shared/core and firmware code remains C++20; small
+host adapters and operations tooling remain Python, PowerShell, or shell where
+native host APIs make those languages the simpler boundary.

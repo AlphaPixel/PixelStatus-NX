@@ -1,0 +1,16 @@
+[Unit]
+Description=PixelStatus NX MI Bluetooth LE display bridge
+Requires=pixelstatus-nx.service
+After=pixelstatus-nx.service
+
+[Service]
+Type=simple
+WorkingDirectory=@PIXELSTATUS_WORKING_DIRECTORY@
+EnvironmentFile=-%h/.config/pixelstatus-nx/environment
+ExecStart="@PIXELSTATUS_PYTHON@" -m tools.mi_ble bridge --url http://127.0.0.1:@PIXELSTATUS_WEB_PORT@/api/v1/display --mode @PIXELSTATUS_MI_MODE@ --poll-ms 250
+Restart=always
+RestartSec=5s
+TimeoutStopSec=15s
+
+[Install]
+WantedBy=default.target

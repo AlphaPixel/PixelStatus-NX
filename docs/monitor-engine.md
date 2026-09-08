@@ -16,8 +16,9 @@ types, or wall-clock dependencies. Tests drive it with explicit steady-clock tim
 points and scripted runners, so scheduling and status transitions are deterministic
 on the desktop. Concrete transports remain separate runner adapters.
 
-The contracts and Windows adapters described before **Deliberately Deferred** are
-implemented and host-tested. The ESP32 runner/executor layer is not started. See
+The contracts plus Windows and Linux host adapters described before
+**Deliberately Deferred** are implemented and host-tested, except that ICMP remains
+Windows-only. The ESP32 runner/executor layer is not started. See
 [Implementation Status and Loose Ends](implementation-status.md) for the complete
 capability matrix and prioritized backlog.
 
@@ -118,7 +119,9 @@ The ICMP-ping runner resolves an IPv4 hostname or address and sends one bounded
 echo request through the Windows ICMP API. Success observes reply latency in
 integer milliseconds. Echo timeouts and unreachable replies use the same normalized
 transport failures as the other runners. The API does not require administrator
-privileges or a raw socket.
+privileges or a raw socket. No Linux ICMP runner is implemented yet; Linux rejects
+that monitor type at startup instead of invoking a shell command or requiring
+undocumented process privileges.
 
 The TCP-exchange runner builds on the same private socket transport. It optionally
 sends a bounded text payload, reads through a configured delimiter under a bounded
@@ -143,7 +146,8 @@ adapter for every transport, including the portable ICMP configuration, remains 
 firmware task.
 
 The Windows host performs HTTPS with WinHTTP/Schannel system trust and resolves
-named header secrets from the environment or Windows Credential Manager. The UniFi
-and OpenWrt sidecars separately implement explicit pre-auth leaf pins; generic C++
-per-monitor pin/custom-CA policy is still deferred. See
+named header secrets from the environment or Windows Credential Manager. Linux uses
+`cpp-httplib`/OpenSSL 3 system trust and environment secrets. The UniFi and OpenWrt
+sidecars separately implement explicit pre-auth leaf pins; generic C++ per-monitor
+pin/custom-CA policy is still deferred. See
 [Appliance Monitoring and TLS](appliance-monitoring.md).

@@ -1,5 +1,7 @@
-#include "win32_output_driver.hpp"
 #include "http_status_server.hpp"
+#ifdef _WIN32
+#include "win32_output_driver.hpp"
+#endif
 
 #include "pixelstatus/config.hpp"
 #include "pixelstatus/frame.hpp"
@@ -15,6 +17,7 @@
 #include <array>
 #include <charconv>
 #include <chrono>
+#include <csignal>
 #include <cstdint>
 #include <filesystem>
 #include <iomanip>
@@ -111,11 +114,16 @@ struct CommandLine {
     std::chrono::milliseconds web_refresh_interval{100};
     std::size_t monitor_worker_count{2U};
     bool web_display_enabled{true};
+#ifdef _WIN32
     bool window_enabled{true};
+#else
+    bool window_enabled{false};
+#endif
 };
 
 std::optional<CommandLine> parse_command_line(int argc, char** argv) {
-    CommandLine options{default_config_path(argv[0])};
+    CommandLine options;
+    options.config_path = default_config_path(argv[0]);
     bool config_was_set{};
     for (int index = 1; index < argc; ++index) {
         const std::string_view argument(argv[index]);
@@ -248,6 +256,12 @@ std::string generate_bearer_token() {
 }  // namespace
 
 int main(int argc, char** argv) {
+#ifndef _WIN32
+    if (std::signal(SIGPIPE, SIG_IGN) == SIG_ERR) {
+        std::cerr << "Unable to disable SIGPIPE for host network transports\n";
+        return 1;
+    }
+#endif
     const auto options = parse_command_line(argc, argv);
     if (!options) {
         std::cerr
@@ -273,6 +287,7 @@ int main(int argc, char** argv) {
         return 1;
     }
 
+#ifdef _WIN32
     std::unique_ptr<pixelstatus::simulator::Win32OutputDriver> display;
     if (options->window_enabled) {
         display = std::make_unique<pixelstatus::simulator::Win32OutputDriver>(
@@ -285,6 +300,7 @@ int main(int argc, char** argv) {
             return 1;
         }
     }
+#endif
 
     std::unique_ptr<pixelstatus::host::HttpDisplayDriver> web_display;
     if (options->web_display_enabled) {
@@ -399,18 +415,27 @@ int main(int argc, char** argv) {
     } else {
         std::cout << "Configured display cards: " << config.cards.size() << '\n';
     }
+#ifdef _WIN32
     if (display) {
         std::cout << "Close the simulator window to exit.\n";
     } else {
         std::cout << "Running headless; press Ctrl+C to exit.\n";
     }
+#else
+    std::cout << "Running headless; press Ctrl+C to exit.\n";
+#endif
     if (config.monitors.empty()) {
         std::cout << "The first region changes status every four seconds.\n";
     } else {
         std::cout << "Configured pull monitors: " << config.monitors.size() << '\n';
     }
 
-    while (!display || display->process_events()) {
+    while (true) {
+#ifdef _WIN32
+        if (display && !display->process_events()) {
+            break;
+        }
+#endif
         const auto now = std::chrono::steady_clock::now();
         if (options->run_for && now - started_at >= *options->run_for) {
             break;
@@ -445,9 +470,11 @@ int main(int argc, char** argv) {
                 std::cerr << "Rendering failed: " << report.error << '\n';
                 return 1;
             }
+#ifdef _WIN32
             if (display) {
                 static_cast<void>(display->submit_frame(frame));
             }
+#endif
             if (web_display) {
                 static_cast<void>(web_display->submit_frame(frame));
             }
@@ -456,11 +483,13 @@ int main(int argc, char** argv) {
         std::this_thread::sleep_for(2ms);
     }
 
+#ifdef _WIN32
     if (display) {
         const auto final_state = display->state();
         std::cout << "Win32 frames submitted: " << final_state.submitted_frames
                   << ", coalesced: " << final_state.coalesced_frames << '\n';
     }
+#endif
     if (web_display) {
         const auto final_state = web_display->state();
         std::cout << "HTTP frames submitted: " << final_state.submitted_frames

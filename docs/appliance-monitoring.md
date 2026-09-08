@@ -5,9 +5,10 @@ appliance integrations. Monitor evaluation, scheduling, and state publication
 remain portable. Desktop and ESP32 runners may use different native network
 libraries as long as they implement the same `MonitorRunner` result contract.
 
-As of 2026-08-22, generic Windows monitoring plus real UniFi and OpenWrt collectors
-are implemented; TrueNAS API depth, Netgear telemetry, Starlink dish telemetry, and
-all ESP32 adapters remain open. The canonical cross-project summary is
+As of 2026-08-23, generic Windows monitoring, the Linux HTTP(S) host path, and real
+UniFi and OpenWrt collectors are implemented; TrueNAS API depth, Netgear telemetry,
+Starlink dish telemetry, and all ESP32 adapters remain open. The canonical
+cross-project summary is
 [Implementation Status and Loose Ends](implementation-status.md).
 
 ## Current Capability
@@ -17,29 +18,29 @@ The desktop HTTP runner currently supports bounded `GET`, `HEAD`, `POST`, `PUT`,
 observe response status or body, extract a scalar with RFC 6901 JSON Pointer, count
 a selected JSON array, or calculate a scaled ratio from two numeric pointers. Plain
 HTTP is integration-tested against authenticated TrueNAS- and UniFi-shaped loopback
-fixtures. On Windows, HTTPS uses WinHTTP/Schannel with system certificate and
-hostname validation.
+fixtures. On Windows, HTTPS uses WinHTTP/Schannel; on Linux, it uses
+`cpp-httplib`/OpenSSL 3. Both use system certificate trust and hostname validation.
 
-Header values support named `${secret:name}` substitution. The Windows host
-resolves environment variables for development and generic Windows Credential
-Manager entries for production. Resolution occurs once during monitor creation;
-unresolved references fail startup and resolved values are never placed in
-diagnostics.
+Header values support named `${secret:name}` substitution. Both hosts resolve
+environment variables; Windows additionally supports generic Credential Manager
+entries. Resolution occurs once during monitor creation; unresolved references fail
+startup and resolved values are never placed in diagnostics.
 
 ## TLS Backends
 
 | Target | Preferred backend | Trust sources | Reason |
 | --- | --- | --- | --- |
 | Windows desktop | WinHTTP with Schannel (implemented) | Windows root stores; optional installed private CA | No separately built TLS library, native proxy and certificate behavior |
+| Linux desktop/headless | `cpp-httplib` with OpenSSL 3 (implemented) | Standard Linux system CA files/directories; optional installed private CA | Small portable host adapter with certificate and hostname verification |
 | ESP32 | ESP-IDF `esp_http_client` over ESP-TLS/mbedTLS | ESP x509 bundle or per-appliance PEM CA; optional pin | Native supported firmware path with bounded configuration |
-| Optional portable desktop | `cpp-httplib` with mbedTLS, OpenSSL, or wolfSSL | Backend CA file/path | Useful if a non-Windows host is added; introduces a native TLS dependency |
 | Optional feature-rich desktop | libcurl, preferably its Schannel build on Windows | Windows root stores or curl CA configuration | Consider only if proxy, cookies, or authentication workflows outgrow WinHTTP |
 
-WinHTTP performs TLS and server-certificate validation through Windows. This lets
-development machines trust a local appliance CA through the normal Windows
-certificate store. A per-appliance pin is useful when changing the machine-wide
-trust store is undesirable. Generic C++ monitor pin/custom-CA configuration and
-rollover remain a later increment. The implemented UniFi and OpenWrt Python
+WinHTTP performs TLS and server-certificate validation through Windows; OpenSSL
+does the equivalent through the standard Linux CA paths. This lets development
+machines trust a local appliance CA through their normal operating-system trust
+store. A per-appliance pin is useful when changing the machine-wide trust store is
+undesirable. Generic C++ monitor pin/custom-CA configuration and rollover remain a
+later increment. The implemented UniFi and OpenWrt Python
 collectors already enforce an explicit leaf-certificate SHA-256 pin before sending
 credentials; their policy is intentionally narrower than the future generic one.
 
@@ -75,8 +76,9 @@ values, for example `"X-API-Key": "${secret:unifi-api-key}"` or
 `"Authorization": "Bearer ${secret:truenas-api-key}"`. The implemented Windows
 resolver first checks `PIXELSTATUS_SECRET_UNIFI_API_KEY`, then the current user's
 generic Credential Manager target `PixelStatus-NX/unifi-api-key`. Environment
-variables are intended for tests and unattended development; Credential Manager is
-the desktop production source.
+variables are the implemented Linux source and are supported for tests and
+unattended development on Windows; Credential Manager is the Windows production
+source.
 
 Resolution occurs immediately before runner construction. Invalid or unresolved
 references fail monitor registration, resolved headers are validated again, and

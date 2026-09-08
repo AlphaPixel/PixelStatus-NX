@@ -2,15 +2,26 @@ cmake_minimum_required(VERSION 3.25)
 
 project(PixelStatusNX VERSION 0.1.0 LANGUAGES CXX)
 
-option(PIXELSTATUS_BUILD_SIMULATOR "Build the native desktop simulator" ON)
+option(PIXELSTATUS_BUILD_SIMULATOR "Build the desktop/headless host simulator" ON)
 option(PIXELSTATUS_BUILD_TESTS "Build host-side tests" ON)
-option(PIXELSTATUS_BUILD_HOST_HTTP "Build the desktop HTTP monitor adapter" ON)
+option(PIXELSTATUS_BUILD_HOST_HTTP "Build the host HTTP monitor adapter" ON)
+if(WIN32)
+    set(PIXELSTATUS_OPENSSL_DEFAULT OFF)
+else()
+    set(PIXELSTATUS_OPENSSL_DEFAULT ON)
+endif()
+option(
+    PIXELSTATUS_ENABLE_OPENSSL
+    "Use OpenSSL for HTTPS monitors on non-Windows hosts"
+    ${PIXELSTATUS_OPENSSL_DEFAULT}
+)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 include(FetchContent)
+find_package(Threads REQUIRED)
 
 set(JSON_BuildTests OFF CACHE INTERNAL "")
 set(JSON_Install OFF CACHE INTERNAL "")
@@ -50,7 +61,8 @@ endif()
 if(PIXELSTATUS_BUILD_HOST_HTTP OR PIXELSTATUS_BUILD_SIMULATOR)
     set(HTTPLIB_INSTALL OFF CACHE INTERNAL "")
     set(HTTPLIB_TEST OFF CACHE INTERNAL "")
-    set(HTTPLIB_USE_OPENSSL_IF_AVAILABLE OFF CACHE INTERNAL "")
+    set(HTTPLIB_REQUIRE_OPENSSL ${PIXELSTATUS_ENABLE_OPENSSL} CACHE BOOL "" FORCE)
+    set(HTTPLIB_USE_OPENSSL_IF_AVAILABLE OFF CACHE BOOL "" FORCE)
     set(HTTPLIB_USE_ZLIB_IF_AVAILABLE OFF CACHE INTERNAL "")
     set(HTTPLIB_USE_BROTLI_IF_AVAILABLE OFF CACHE INTERNAL "")
     set(HTTPLIB_USE_ZSTD_IF_AVAILABLE OFF CACHE INTERNAL "")
@@ -81,6 +93,7 @@ if(PIXELSTATUS_BUILD_HOST_HTTP)
         pixelstatus_core
         httplib::httplib
         nlohmann_json::nlohmann_json
+        Threads::Threads
     )
     if(WIN32)
         target_sources(pixelstatus_host PRIVATE
@@ -101,9 +114,6 @@ if(PIXELSTATUS_BUILD_HOST_HTTP)
 endif()
 
 if(PIXELSTATUS_BUILD_SIMULATOR)
-    if(NOT WIN32)
-        message(FATAL_ERROR "The current simulator uses the Win32 API")
-    endif()
     if(NOT PIXELSTATUS_BUILD_HOST_HTTP)
         message(FATAL_ERROR "The simulator requires PIXELSTATUS_BUILD_HOST_HTTP")
     endif()
@@ -111,23 +121,31 @@ if(PIXELSTATUS_BUILD_SIMULATOR)
     add_executable(pixelstatus_simulator
         src/simulator/http_status_server.cpp
         src/simulator/main.cpp
-        src/simulator/win32_output_driver.cpp
     )
+    if(WIN32)
+        target_sources(pixelstatus_simulator PRIVATE
+            src/simulator/win32_output_driver.cpp
+        )
+    endif()
     target_include_directories(pixelstatus_simulator PRIVATE src/simulator)
     target_link_libraries(pixelstatus_simulator PRIVATE
         pixelstatus_core
         pixelstatus_host
         httplib::httplib
-        user32
-        gdi32
+        Threads::Threads
     )
-    target_compile_definitions(pixelstatus_simulator PRIVATE
-        NOMINMAX
-        WIN32_LEAN_AND_MEAN
-    )
+    if(WIN32)
+        target_link_libraries(pixelstatus_simulator PRIVATE user32 gdi32)
+        target_compile_definitions(pixelstatus_simulator PRIVATE
+            NOMINMAX
+            WIN32_LEAN_AND_MEAN
+        )
+    endif()
 
     if(MSVC)
         target_compile_options(pixelstatus_simulator PRIVATE /W4 /permissive-)
+    else()
+        target_compile_options(pixelstatus_simulator PRIVATE -Wall -Wextra -Wpedantic)
     endif()
 
     add_custom_command(
