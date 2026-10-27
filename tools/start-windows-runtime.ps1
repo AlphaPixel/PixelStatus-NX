@@ -20,6 +20,7 @@ $arguments = @{
     UnifiCertificateSha256 = $profile.unifi_certificate_sha256
     OpenWrtUrl = $profile.openwrt_url
     OpenWrtCertificateSha256 = $profile.openwrt_certificate_sha256
+    ClaudeUsage = [bool]$profile.claude_usage
     MiStatusFile = Join-Path $runtimeRoot 'logs\mi-ble-status.json'
     ProcessFile = Join-Path $runtimeRoot 'logs\runtime-processes.json'
     RestartMiBridge = $true

@@ -206,7 +206,10 @@ nested within a stack to place foreground widgets over a shared background.
 - `indicator` fills its complete bounds with the source's effective status
   appearance.
 - `clock` draws a centered 15×7 local or UTC time and therefore requires bounds of
-  at least that size.
+  at least that size. An optional `source` makes it show that source's numeric
+  value, read as Unix epoch seconds, instead of the current time; its colon stays
+  lit, and a missing or non-numeric value leaves the bounds blank. The Claude usage
+  card uses this for the 5-hour reset time published by `tools/claude_usage`.
 - `bar` reads a numeric source value. `minimum` and `maximum` default to 0 and 100;
   `direction` defaults to `right` and also accepts `left`, `up`, or `down`. The fill
   color is the source's status appearance and `track_color` defaults to the display

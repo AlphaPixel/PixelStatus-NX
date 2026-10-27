@@ -72,6 +72,11 @@ std::vector<std::string> unique_sources(const pixelstatus::AppConfig& config) {
                 if (bar != nullptr && seen.insert(bar->source).second) {
                     sources.push_back(bar->source);
                 }
+                const auto* clock = std::get_if<pixelstatus::LayoutClockConfig>(&widget);
+                if (clock != nullptr && !clock->source.empty()
+                    && seen.insert(clock->source).second) {
+                    sources.push_back(clock->source);
+                }
                 const auto* grid =
                     std::get_if<pixelstatus::LayoutStatusGridConfig>(&widget);
                 if (grid != nullptr) {

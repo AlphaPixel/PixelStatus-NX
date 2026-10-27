@@ -2,7 +2,9 @@
 param(
     [string]$RuntimeRoot = (Join-Path $env:LOCALAPPDATA 'AlphaPixel\PixelStatus-NX'),
     [string]$TaskName = 'AlphaPixel PixelStatus-NX',
-    [switch]$CleanLegacyProcesses
+    [switch]$CleanLegacyProcesses,
+    # Enables the Claude usage collector; once published it stays on in later updates.
+    [switch]$ClaudeUsage
 )
 
 $ErrorActionPreference = 'Stop'
@@ -61,7 +63,7 @@ if ($CleanLegacyProcesses) {
         )
         $hostAdapter = (
             $_.Name -match '^python(?:w)?\.exe$' -and
-            $commandLine -match '(?i)-m\s+tools\.(?:mi_ble|unifi|openwrt)(?:\s|$)'
+            $commandLine -match '(?i)-m\s+tools\.(?:mi_ble|unifi|openwrt|claude_usage)(?:\s|$)'
         )
         $publishedPowerShell = (
             $_.Name -match '^(?:powershell|pwsh)\.exe$' -and
@@ -88,6 +90,7 @@ $publishArguments = @{
     OpenWrtUrl = [string]$profile.openwrt_url
     OpenWrtCertificateSha256 = [string]$profile.openwrt_certificate_sha256
     MiMode = [string]$profile.mi_mode
+    ClaudeUsage = $ClaudeUsage -or [bool]$profile.claude_usage
 }
 & (Join-Path $PSScriptRoot 'publish-windows-runtime.ps1') @publishArguments
 & (Join-Path $PSScriptRoot 'register-windows-task.ps1') `

@@ -78,6 +78,7 @@ function Get-EndpointState {
     Browser = Get-EndpointState 'http://127.0.0.1:18908/api/v1/display'
     UniFiCollector = Get-EndpointState 'http://127.0.0.1:18950/health'
     OpenWrtCollector = Get-EndpointState 'http://127.0.0.1:18951/health'
+    ClaudeUsageCollector = Get-EndpointState 'http://127.0.0.1:18952/health'
     MiDisplay = if ($null -eq $miStatus) {
         'unavailable'
     } elseif (-not $miHeartbeatFresh) {

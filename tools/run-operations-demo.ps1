@@ -17,6 +17,7 @@ param(
     [string]$OpenWrtUrl,
     [ValidatePattern('^(?:[0-9A-Fa-f]{2}:?){32}$')]
     [string]$OpenWrtCertificateSha256,
+    [switch]$ClaudeUsage,
     [string]$PythonExecutable,
     [string]$MiStatusFile,
     [string]$ProcessFile,
@@ -43,7 +44,7 @@ function Stop-RecordedRuntimeProcesses {
     try {
         $manifest = Get-Content -Raw -LiteralPath $ProcessFile | ConvertFrom-Json
         foreach ($entry in @($manifest.processes)) {
-            if ($entry.role -notin @('simulator', 'unifi', 'openwrt')) {
+            if ($entry.role -notin @('simulator', 'unifi', 'openwrt', 'claude_usage')) {
                 continue
             }
             $process = Get-Process -Id ([int]$entry.pid) -ErrorAction SilentlyContinue
@@ -88,7 +89,8 @@ function Write-RuntimeProcessManifest {
     foreach ($item in @(
         @{Role = 'simulator'; Process = $simulatorProcess},
         @{Role = 'unifi'; Process = $unifiProcess},
-        @{Role = 'openwrt'; Process = $openWrtProcess}
+        @{Role = 'openwrt'; Process = $openWrtProcess},
+        @{Role = 'claude_usage'; Process = $claudeUsageProcess}
     )) {
         $process = $item.Process
         if ($null -ne $process -and -not $process.HasExited) {
@@ -123,7 +125,7 @@ if ([bool]$OpenWrtUrl -ne [bool]$OpenWrtCertificateSha256) {
 }
 $useOpenWrtCollector = $OpenWrtUrl -or $OpenWrtCertificateSha256
 $pythonPath = $null
-if (-not $BrowserOnly -or $useUnifiCollector -or $useOpenWrtCollector) {
+if (-not $BrowserOnly -or $useUnifiCollector -or $useOpenWrtCollector -or $ClaudeUsage) {
     if ($PythonExecutable) {
         $pythonPath = (Get-Item -LiteralPath $PythonExecutable -ErrorAction Stop).FullName
     } else {
@@ -145,6 +147,7 @@ $simulatorArguments = @(
 $simulatorProcess = $null
 $unifiProcess = $null
 $openWrtProcess = $null
+$claudeUsageProcess = $null
 
 Push-Location $repositoryRoot
 try {
@@ -225,6 +228,38 @@ try {
             throw "OpenWrt collector did not respond at $openWrtHealthUrl within 20 seconds"
         }
         Write-Host "OpenWrt bridge and Starlink-path monitoring is responding through $openWrtHealthUrl"
+    }
+
+    if ($ClaudeUsage) {
+        $claudeUsageProcess = Start-Process `
+            -FilePath $pythonPath `
+            -ArgumentList @('-m', 'tools.claude_usage', 'serve', '--port', '18952') `
+            -WorkingDirectory $repositoryRoot `
+            -WindowStyle Hidden `
+            -PassThru
+        Write-RuntimeProcessManifest
+
+        $claudeUsageHealthUrl = 'http://127.0.0.1:18952/health'
+        $claudeUsageDeadline = [DateTime]::UtcNow.AddSeconds(20)
+        $claudeUsageReady = $false
+        while ([DateTime]::UtcNow -lt $claudeUsageDeadline) {
+            if ($claudeUsageProcess.HasExited) {
+                throw "Claude usage collector exited during startup with code $($claudeUsageProcess.ExitCode)"
+            }
+            try {
+                $claudeUsageHealth = Invoke-RestMethod -Uri $claudeUsageHealthUrl -TimeoutSec 1
+                if ($claudeUsageHealth.collector.status -in @('healthy', 'error')) {
+                    $claudeUsageReady = $true
+                    break
+                }
+            } catch {
+            }
+            Start-Sleep -Milliseconds 200
+        }
+        if (-not $claudeUsageReady) {
+            throw "Claude usage collector did not respond at $claudeUsageHealthUrl within 20 seconds"
+        }
+        Write-Host "Claude plan usage monitoring is responding through $claudeUsageHealthUrl"
     }
 
     $simulatorProcess = Start-Process `
@@ -309,6 +344,10 @@ try {
     if ($null -ne $openWrtProcess -and -not $openWrtProcess.HasExited) {
         Stop-Process -Id $openWrtProcess.Id
         $openWrtProcess.WaitForExit()
+    }
+    if ($null -ne $claudeUsageProcess -and -not $claudeUsageProcess.HasExited) {
+        Stop-Process -Id $claudeUsageProcess.Id
+        $claudeUsageProcess.WaitForExit()
     }
     if ($ProcessFile) {
         Remove-Item -LiteralPath $ProcessFile -Force -ErrorAction SilentlyContinue

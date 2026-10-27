@@ -250,6 +250,15 @@ if(PIXELSTATUS_BUILD_TESTS)
                 pixelstatus_openwrt_python_tests
                 PROPERTIES WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
             )
+            add_test(
+                NAME pixelstatus_claude_usage_python_tests
+                COMMAND ${Python3_EXECUTABLE} -m unittest discover
+                    -s tests -p test_claude_usage.py -v
+            )
+            set_tests_properties(
+                pixelstatus_claude_usage_python_tests
+                PROPERTIES WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+            )
         endif()
     endif()
 endif()

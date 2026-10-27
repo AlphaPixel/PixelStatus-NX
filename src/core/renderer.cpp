@@ -449,6 +449,43 @@ RenderReport render_card(
                 report.error = "Layout widget became invalid during rendering";
                 return report;
             }
+            if (!clock->source.empty()) {
+                // A sourced clock shows a supplied instant, so its colon stays lit
+                // and a missing or non-time value leaves the bounds blank.
+                const auto resolved = states.resolve(clock->source, now);
+                if (!resolved) {
+                    ++report.missing_sources;
+                    continue;
+                }
+                const auto epoch = numeric_value(resolved->state.value);
+                std::tm source_local{};
+                std::tm source_utc{};
+                if (!epoch || *epoch < 0.0 || *epoch > 32503680000.0
+                    || !split_wall_time(
+                        std::chrono::system_clock::from_time_t(
+                            static_cast<std::time_t>(*epoch)),
+                        source_local,
+                        source_utc)) {
+                    ++report.invalid_values;
+                    continue;
+                }
+                const auto& shown =
+                    clock->timezone == ClockTimeZone::local ? source_local : source_utc;
+                if (!draw_time(
+                        output,
+                        clock->x,
+                        clock->y,
+                        clock->width,
+                        clock->height,
+                        shown.tm_hour,
+                        shown.tm_min,
+                        true,
+                        clock->color)) {
+                    report.error = "Layout clock bounds became invalid during rendering";
+                    return report;
+                }
+                continue;
+            }
             if (!wall_time_loaded) {
                 if (!split_wall_time(wall_now, local, utc)) {
                     report.error = "Layout clock could not convert the current wall time";

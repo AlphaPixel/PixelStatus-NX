@@ -15,6 +15,7 @@ param(
     [Parameter(Mandatory)]
     [ValidatePattern('^(?:[0-9A-Fa-f]{2}:?){32}$')]
     [string]$OpenWrtCertificateSha256,
+    [switch]$ClaudeUsage,
     [ValidateSet('pixel', 'block')]
     [string]$MiMode = 'block',
     [string]$TaskName = 'AlphaPixel PixelStatus-NX',
@@ -96,6 +97,7 @@ Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'requirements-mi-ble.txt') -Dest
 Copy-PythonPackage -Name 'mi_ble' -DestinationRoot $runtimeTools
 Copy-PythonPackage -Name 'unifi' -DestinationRoot $runtimeTools
 Copy-PythonPackage -Name 'openwrt' -DestinationRoot $runtimeTools
+Copy-PythonPackage -Name 'claude_usage' -DestinationRoot $runtimeTools
 Copy-Item -LiteralPath (Join-Path $repositoryRoot 'THIRD_PARTY_NOTICES.md') -Destination $releaseRoot
 
 $profile = [ordered]@{
@@ -107,6 +109,7 @@ $profile = [ordered]@{
     unifi_certificate_sha256 = $UnifiCertificateSha256
     openwrt_url = $OpenWrtUrl
     openwrt_certificate_sha256 = $OpenWrtCertificateSha256
+    claude_usage = [bool]$ClaudeUsage
 }
 $profile | ConvertTo-Json | Set-Content `
     -LiteralPath (Join-Path $releaseRoot 'runtime.local.json') `

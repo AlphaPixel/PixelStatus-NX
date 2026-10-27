@@ -1594,20 +1594,22 @@ struct LayoutBounds {
     if (assigned) {
         reject_unknown_fields(
             item,
-            {"id", "type", "timezone", "color", "size", "weight"},
+            {"id", "type", "timezone", "color", "source", "size", "weight"},
             path,
             result);
     } else {
         reject_unknown_fields(
             item,
-            {"id", "type", "x", "y", "width", "height", "timezone", "color"},
+            {"id", "type", "x", "y", "width", "height", "timezone", "color", "source"},
             path,
             result);
     }
     const auto id = required_identifier(item, "id", path, result);
     const auto bounds = parse_layout_bounds(item, path, display, result, assigned);
     const auto timezone = required_string(item, "timezone", path, result);
-    if (!id || !bounds || !timezone || !layout_bounds_are_valid(*bounds, path, result)) {
+    const auto source = optional_identifier(item, "source", path, result);
+    if (!id || !bounds || !timezone || !layout_bounds_are_valid(*bounds, path, result)
+        || (item.contains("source") && !source)) {
         return std::nullopt;
     }
     if (bounds->width < 15U || bounds->height < 7U) {
@@ -1617,6 +1619,7 @@ struct LayoutBounds {
 
     LayoutClockConfig clock;
     clock.id = *id;
+    clock.source = source.value_or(std::string{});
     clock.x = bounds->x;
     clock.y = bounds->y;
     clock.width = bounds->width;

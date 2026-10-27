@@ -71,6 +71,8 @@ struct LayoutClockConfig {
     std::size_t height{7};
     ClockTimeZone timezone{ClockTimeZone::local};
     Rgb color{0x00, 0xB0, 0xFF};
+    // When set, shows this source's Unix-epoch-seconds value instead of now.
+    std::string source;
 };
 
 enum class BarDirection {

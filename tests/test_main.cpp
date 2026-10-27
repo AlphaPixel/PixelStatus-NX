@@ -27,6 +27,7 @@
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
+#include <ctime>
 #include <deque>
 #include <filesystem>
 #include <fstream>
@@ -390,6 +391,57 @@ void test_layout_card_renderer() {
     CHECK((*frame.pixel(0U, 9U) == pixelstatus::Rgb{255U, 214U, 0U}));
     CHECK((*frame.pixel(7U, 11U) == pixelstatus::Rgb{255U, 214U, 0U}));
     CHECK((*frame.pixel(6U, 9U) == pixelstatus::Rgb{1U, 2U, 3U}));
+}
+
+void test_sourced_clock_renderer() {
+    const auto origin = pixelstatus::TimePoint{};
+    const std::time_t reset = 1793147400;  // 2026-10-28 00:30:00 UTC
+    pixelstatus::AppConfig config;
+    config.display = {16U, 7U, {1U, 2U, 3U}};
+    config.statuses.emplace("ok", pixelstatus::TimelineAppearance::solid({0U, 255U, 0U}));
+
+    const auto render = [&](const std::string& source,
+                            const pixelstatus::StateStore& states,
+                            std::chrono::system_clock::time_point wall_now) {
+        pixelstatus::LayoutClockConfig clock;
+        clock.id = "clock";
+        clock.width = 16U;
+        clock.height = 7U;
+        clock.timezone = pixelstatus::ClockTimeZone::utc;
+        clock.source = source;
+        pixelstatus::LayoutCardConfig layout;
+        layout.widgets.emplace_back(clock);
+        auto card_config = config;
+        pixelstatus::CardConfig card;
+        card.id = "clock";
+        card.content = std::move(layout);
+        card_config.cards.push_back(std::move(card));
+        pixelstatus::Frame frame(16U, 7U);
+        CHECK(pixelstatus::Renderer(origin)
+                  .render(states, card_config, origin, wall_now, frame)
+                  .success);
+        return std::vector<pixelstatus::Rgb>(frame.pixels().begin(), frame.pixels().end());
+    };
+
+    pixelstatus::StateStore states;
+    pixelstatus::MonitorState state;
+    state.id = "reset";
+    state.status = "ok";
+    state.value = static_cast<std::int64_t>(reset);
+    state.observed_at = origin;
+    state.updated_at = origin;
+    CHECK(states.upsert(std::move(state)));
+
+    // The sourced clock ignores the wall clock and matches a plain clock at that instant.
+    const auto sourced = render("reset", states, std::chrono::system_clock::time_point{});
+    const auto expected =
+        render("", states, std::chrono::system_clock::from_time_t(reset));
+    CHECK(sourced == expected);
+
+    const auto missing = render("absent", states, std::chrono::system_clock::from_time_t(reset));
+    CHECK(std::all_of(missing.begin(), missing.end(), [](const pixelstatus::Rgb& pixel) {
+        return pixel == pixelstatus::Rgb{1U, 2U, 3U};
+    }));
 }
 
 void test_split_layout_widget_renderer() {
@@ -2790,6 +2842,7 @@ int main() {
     test_card_deck_slide_directions();
     test_clock_card_renderer();
     test_layout_card_renderer();
+    test_sourced_clock_renderer();
     test_split_layout_widget_renderer();
     test_layered_aggregate_status_renderer();
     test_mi_protocol_vectors();
