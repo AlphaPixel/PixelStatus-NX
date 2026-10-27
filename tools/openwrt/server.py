@@ -83,8 +83,9 @@ def refresh_loop(
     interval_seconds: float,
     uplink_interface: str,
 ) -> None:
-    while not stop.wait(interval_seconds):
+    while not stop.is_set():
         refresh_once(client, store, uplink_interface=uplink_interface)
+        stop.wait(interval_seconds)
 
 
 class HealthHandler(BaseHTTPRequestHandler):
@@ -114,8 +115,6 @@ def serve(
     uplink_interface: str,
 ) -> None:
     store = SnapshotStore()
-    refresh_once(client, store, uplink_interface=uplink_interface)
-
     handler = type("ConfiguredHealthHandler", (HealthHandler,), {"store": store})
     server = ThreadingHTTPServer(("127.0.0.1", port), handler)
     stop = threading.Event()

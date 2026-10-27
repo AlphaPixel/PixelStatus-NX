@@ -174,7 +174,7 @@ try {
             }
             try {
                 $unifiHealth = Invoke-RestMethod -Uri $unifiHealthUrl -TimeoutSec 1
-                if ($unifiHealth.collector.status -eq 'healthy') {
+                if ($unifiHealth.collector.status -in @('healthy', 'error')) {
                     $unifiReady = $true
                     break
                 }
@@ -183,9 +183,9 @@ try {
             Start-Sleep -Milliseconds 200
         }
         if (-not $unifiReady) {
-            throw "UniFi collector did not become healthy at $unifiHealthUrl within 20 seconds"
+            throw "UniFi collector did not respond at $unifiHealthUrl within 20 seconds"
         }
-        Write-Host "Official UniFi monitoring is active through $unifiHealthUrl"
+        Write-Host "Official UniFi monitoring is responding through $unifiHealthUrl"
     }
 
     if ($useOpenWrtCollector) {
@@ -213,7 +213,7 @@ try {
             }
             try {
                 $openWrtHealth = Invoke-RestMethod -Uri $openWrtHealthUrl -TimeoutSec 1
-                if ($openWrtHealth.collector.status -eq 'healthy') {
+                if ($openWrtHealth.collector.status -in @('healthy', 'error')) {
                     $openWrtReady = $true
                     break
                 }
@@ -222,9 +222,9 @@ try {
             Start-Sleep -Milliseconds 200
         }
         if (-not $openWrtReady) {
-            throw "OpenWrt collector did not become healthy at $openWrtHealthUrl within 20 seconds"
+            throw "OpenWrt collector did not respond at $openWrtHealthUrl within 20 seconds"
         }
-        Write-Host "OpenWrt bridge and Starlink-path monitoring is active through $openWrtHealthUrl"
+        Write-Host "OpenWrt bridge and Starlink-path monitoring is responding through $openWrtHealthUrl"
     }
 
     $simulatorProcess = Start-Process `

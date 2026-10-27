@@ -81,8 +81,9 @@ def refresh_loop(
     site_id: str | None,
     device_id: str | None,
 ) -> None:
-    while not stop.wait(interval_seconds):
+    while not stop.is_set():
         refresh_once(client, store, site_id=site_id, device_id=device_id)
+        stop.wait(interval_seconds)
 
 
 class HealthHandler(BaseHTTPRequestHandler):
@@ -113,8 +114,6 @@ def serve(
     device_id: str | None,
 ) -> None:
     store = SnapshotStore()
-    refresh_once(client, store, site_id=site_id, device_id=device_id)
-
     handler = type("ConfiguredHealthHandler", (HealthHandler,), {"store": store})
     server = ThreadingHTTPServer(("127.0.0.1", port), handler)
     stop = threading.Event()

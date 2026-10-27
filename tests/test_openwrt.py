@@ -3,7 +3,9 @@ from __future__ import annotations
 import datetime as dt
 import hashlib
 import json
+import threading
 import unittest
+from unittest.mock import patch
 
 from tools.openwrt.client import (
     CertificatePinError,
@@ -12,7 +14,7 @@ from tools.openwrt.client import (
     build_snapshot,
     parse_certificate_sha256,
 )
-from tools.openwrt.server import SnapshotStore
+from tools.openwrt.server import SnapshotStore, refresh_loop
 
 
 class FakeSocket:
@@ -182,6 +184,18 @@ class FakeOpenWrtClient:
 
 
 class SnapshotTests(unittest.TestCase):
+    def test_refresh_loop_attempts_immediately(self) -> None:
+        stop = threading.Event()
+        with patch(
+            "tools.openwrt.server.refresh_once",
+            side_effect=lambda *args, **kwargs: stop.set(),
+        ) as refresh:
+            refresh_loop(  # type: ignore[arg-type]
+                object(), SnapshotStore(), stop,
+                interval_seconds=60, uplink_interface="wwan",
+            )
+        refresh.assert_called_once()
+
     def test_snapshot_reports_bridge_and_starlink_path_without_private_identifiers(self) -> None:
         client = FakeOpenWrtClient()
         snapshot = build_snapshot(

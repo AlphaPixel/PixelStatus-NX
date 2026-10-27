@@ -3,7 +3,9 @@ from __future__ import annotations
 import datetime as dt
 import hashlib
 import json
+import threading
 import unittest
+from unittest.mock import patch
 
 from tools.unifi.client import (
     CertificatePinError,
@@ -12,7 +14,7 @@ from tools.unifi.client import (
     build_snapshot,
     parse_certificate_sha256,
 )
-from tools.unifi.server import SnapshotStore
+from tools.unifi.server import SnapshotStore, refresh_loop
 
 
 class FakeSocket:
@@ -147,6 +149,18 @@ class FakeUnifiClient:
 
 
 class SnapshotTests(unittest.TestCase):
+    def test_refresh_loop_attempts_immediately(self) -> None:
+        stop = threading.Event()
+        with patch(
+            "tools.unifi.server.refresh_once",
+            side_effect=lambda *args, **kwargs: stop.set(),
+        ) as refresh:
+            refresh_loop(  # type: ignore[arg-type]
+                object(), SnapshotStore(), stop,
+                interval_seconds=60, site_id=None, device_id=None,
+            )
+        refresh.assert_called_once()
+
     def test_snapshot_is_stable_and_omits_addresses_and_internal_ids(self) -> None:
         client = FakeUnifiClient()
         snapshot = build_snapshot(
