@@ -2177,6 +2177,84 @@ private:
     std::thread worker_;
 };
 
+// Answers the first bytes of every connection with plaintext HTTP, so a TLS client
+// fails its handshake at once. WinHTTP retries with a fallback ClientHello on a
+// second connection, which must also be answered or the retry times out.
+class PlaintextReplyServer {
+public:
+    PlaintextReplyServer() {
+        listener_ = ::socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+        sockaddr_in address{};
+        address.sin_family = AF_INET;
+        address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+        socklen_t length = sizeof(address);
+        if (listener_ == INVALID_SOCKET
+            || ::bind(listener_, reinterpret_cast<sockaddr*>(&address), sizeof(address)) != 0
+            || ::listen(listener_, 1) != 0
+            || ::getsockname(listener_, reinterpret_cast<sockaddr*>(&address), &length) != 0) {
+            close(listener_);
+            throw std::runtime_error("Unable to bind plaintext reply server");
+        }
+        port_ = ntohs(address.sin_port);
+        worker_ = std::thread([this] {
+            while (true) {
+                const auto client = ::accept(listener_, nullptr, nullptr);
+                if (client == INVALID_SOCKET || stopping_) {
+                    close(client);
+                    return;
+                }
+                std::array<char, 4096> buffer{};
+                static_cast<void>(
+                    ::recv(client, buffer.data(), static_cast<int>(buffer.size()), 0));
+                static constexpr std::string_view reply =
+                    "HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+                static_cast<void>(
+                    ::send(client, reply.data(), static_cast<int>(reply.size()), 0));
+                close(client);
+            }
+        });
+    }
+
+    PlaintextReplyServer(const PlaintextReplyServer&) = delete;
+    PlaintextReplyServer& operator=(const PlaintextReplyServer&) = delete;
+
+    ~PlaintextReplyServer() {
+        // Connect once ourselves so the blocked accept() returns and sees the flag.
+        stopping_ = true;
+        const auto wake = ::socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+        sockaddr_in address{};
+        address.sin_family = AF_INET;
+        address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+        address.sin_port = htons(port_);
+        static_cast<void>(
+            ::connect(wake, reinterpret_cast<sockaddr*>(&address), sizeof(address)));
+        close(wake);
+        worker_.join();
+        close(listener_);
+    }
+
+    [[nodiscard]] std::string https_url(std::string_view target) const {
+        return "https://127.0.0.1:" + std::to_string(port_) + std::string(target);
+    }
+
+private:
+    static void close(socket_t socket) {
+        if (socket == INVALID_SOCKET) {
+            return;
+        }
+#ifdef _WIN32
+        ::closesocket(socket);
+#else
+        ::close(socket);
+#endif
+    }
+
+    socket_t listener_{INVALID_SOCKET};
+    std::uint16_t port_{};
+    std::atomic<bool> stopping_{};
+    std::thread worker_;
+};
+
 void test_host_http_monitor_runner() {
     MockHttpMonitorServer server;
 
@@ -2349,8 +2427,8 @@ void test_host_http_monitor_runner() {
     config.url = "https://example.test/health";
 #if defined(_WIN32) || defined(CPPHTTPLIB_OPENSSL_SUPPORT)
     CHECK(pixelstatus::host::create_http_monitor_runner(config));
-    config.url = server.url("/health");
-    config.url.replace(0U, 4U, "https");
+    const PlaintextReplyServer plaintext;
+    config.url = plaintext.https_url("/health");
     config.timeout = 1s;
     created = pixelstatus::host::create_http_monitor_runner(config);
     CHECK(created);
